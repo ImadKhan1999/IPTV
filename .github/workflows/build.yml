@@ -1,0 +1,120 @@
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: "3.50.1"
+
+jobs:
+  test:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  android:
+    name: Android + Android TV APK
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.IPTV_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Decode signing key
+        if: env.HAS_SIGNING_KEY == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.IPTV_KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/iptv.jks" && echo "IPTV_KEYSTORE_FILE=$RUNNER_TEMP/iptv.jks" >> "$GITHUB_ENV"
+      - name: Build APKs
+        env:
+          IPTV_KEYSTORE_PASSWORD: ${{ secrets.IPTV_KEYSTORE_PASSWORD }}
+          IPTV_KEY_ALIAS: ${{ secrets.IPTV_KEY_ALIAS }}
+          IPTV_KEY_PASSWORD: ${{ secrets.IPTV_KEY_PASSWORD }}
+        run: |
+          flutter build apk --release
+          flutter build apk --release --split-per-abi
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk dist/iPTV-universal.apk
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            cp build/app/outputs/flutter-apk/app-$abi-release.apk dist/iPTV-$abi.apk
+          done
+          cd dist && sha256sum *.apk > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iPTV-android
+          path: dist/
+          retention-days: 14
+
+  windows:
+    name: Windows app
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter build windows --release
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/iPTV-windows-x64.zip
+      - name: Build installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$((Select-String -Path pubspec.yaml -Pattern '^version: (\S+)').Matches[0].Groups[1].Value.Split('+')[0]) windows/installer.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iPTV-windows
+          path: dist/
+          retention-days: 14
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

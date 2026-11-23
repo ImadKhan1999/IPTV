@@ -1,0 +1,43 @@
+name: iptv
+description: "iPTV by ImadLabs - IPTV player for Android, Android TV and Windows"
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  material_ui: ^1.1.0
+
+  cupertino_icons: ^1.0.8
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  media_kit_libs_video: ^1.0.7
+  provider: ^6.1.5+1
+  http: ^1.6.0
+  xml: ^7.1.0
+  crypto: ^3.0.8
+  path_provider: ^2.1.6
+  wakelock_plus: ^1.8.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/brand/
+
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter.ttf
+    - family: PlusJakartaSans
+      fonts:
+        - asset: assets/fonts/PlusJakartaSans.ttf
