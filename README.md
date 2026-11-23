@@ -11,15 +11,18 @@ iPTV plays the playlist from your own provider. It ships with no channels or con
 
 ## Features
 
-- **Every common IPTV login**: M3U / M3U8 playlists (URL or file), **Xtream Codes** (username + password) and **Stalker / Ministra portals** (MAC address).
-- **Live TV** with categories, channel numbers, logos, a filter box, and a now / next **TV guide** panel (XMLTV, gzip supported, or the provider's own EPG).
+- **Every common IPTV login**: M3U / M3U8 playlists (URL or file), **Xtream Codes** (username + password) and **Stalker / Ministra portals** (MAC address, plus serial number, device ID 1 and 2, signature and STB model for portals locked to a box).
+- **Live TV** with categories, channel numbers, logos, a filter box, and a now / next **TV guide** panel (XMLTV, gzip supported, or the provider's own EPG). Picking a channel plays it in a **preview beside the channel list**; pick it again or press full screen to go big, without restarting the stream.
+- **Counts everywhere**: how many channels, movies and series the playlist has, and how many are in each category.
 - **Movies and Series** with posters, ratings, plots, seasons and episodes, **resume where you left off**, and auto-play of the next episode.
 - **Catch-up / timeshift** for Xtream and M3U playlists that support it (`catchup`, `catchup-source`, flussonic and shift styles).
 - **Favorites, recently watched and Continue watching**, kept per playlist.
 - **Global search** across channels, movies and series.
 - **Several playlists**, switch between them in Settings.
 - **Parental control**: 4-digit PIN, lock any category, adult categories hidden or PIN-locked automatically.
-- **Player** built on libmpv (media_kit) with hardware decoding, big buffers and auto-reconnect for live streams, audio and subtitle track selection, aspect modes, picture-in-picture on Android phones, and full screen on Windows.
+- **Player** built on libmpv (media_kit) with hardware decoding, big buffers and auto-reconnect for live streams. Centered play controls, **sound and brightness** controls (swipe on phones, mouse wheel on Windows), audio and subtitle track selection, aspect modes, picture-in-picture on Android phones, and full screen on Windows.
+- **Stream info panel**: resolution, video and audio codec, frame rate, bitrate, hardware or software decoding, buffer and dropped frames.
+- **Clear loading and errors**: start-up shows each step (link, server, buffering with a percentage, reconnecting), and failures say why: channel offline (404), subscription expired or too many devices (401/403/458), server error (5xx), timeout, no internet.
 - **Android TV first-class**: appears on the TV home screen with its own banner, every screen works with the D-pad, and focused items glow in ImadLabs mint.
 
 ## Remote control and keyboard
@@ -32,7 +35,9 @@ iPTV plays the playlist from your own provider. It ships with no channels or con
 | Number keys | Jump to channel number |
 | Play/Pause, Space | Play / pause |
 | Fast-forward / Rewind | Seek 30 s |
-| Info, I | Show or hide the info bar |
+| Info, I | Stream info panel |
+| M | Mute |
+| + / −, mouse wheel | Volume |
 | Back, Esc | Hide controls, then leave the player |
 | F, F11 | Full screen (Windows) |
 

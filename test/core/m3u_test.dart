@@ -106,6 +106,13 @@ void main() {
       expect(details.seasons[1]!.map((e) => e.number), [1, 2]);
     });
 
+    test('counts items per category', () async {
+      final counts = await source.categoryCounts(ContentType.live);
+      expect(counts![Category.allId], 4);
+      expect(counts['News'], isNotNull);
+      expect((await source.categoryCounts(ContentType.series))![Category.allId], 1);
+    });
+
     test('lists movies', () async {
       final movies = await source.movies('Movies');
       expect(movies.single.name, 'The Matrix (1999)');

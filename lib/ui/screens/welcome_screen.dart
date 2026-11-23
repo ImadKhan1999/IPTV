@@ -92,14 +92,39 @@ class _AddPlaylistFormState extends State<AddPlaylistForm> {
   late final _mac = TextEditingController(text: widget.existing?.mac ?? '00:1A:79:');
   late final _epg = TextEditingController(text: widget.existing?.epgUrl ?? '');
   late final _ua = TextEditingController(text: widget.existing?.userAgent ?? '');
+  late final _serial = TextEditingController(text: widget.existing?.serial ?? '');
+  late final _deviceId = TextEditingController(text: widget.existing?.deviceId ?? '');
+  late final _deviceId2 = TextEditingController(text: widget.existing?.deviceId2 ?? '');
+  late final _signature = TextEditingController(text: widget.existing?.signature ?? '');
+  late final _stbModel = TextEditingController(text: widget.existing?.stbModel ?? '');
   bool _advanced = false;
+  late bool _deviceIds = [
+    widget.existing?.serial,
+    widget.existing?.deviceId,
+    widget.existing?.deviceId2,
+    widget.existing?.signature,
+    widget.existing?.stbModel,
+  ].any((v) => v != null && v.isNotEmpty);
   bool _busy = false;
   String? _error;
   bool _obscure = true;
 
   @override
   void dispose() {
-    for (final c in [_name, _url, _user, _pass, _mac, _epg, _ua]) {
+    for (final c in [
+      _name,
+      _url,
+      _user,
+      _pass,
+      _mac,
+      _epg,
+      _ua,
+      _serial,
+      _deviceId,
+      _deviceId2,
+      _signature,
+      _stbModel,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -149,6 +174,11 @@ class _AddPlaylistFormState extends State<AddPlaylistForm> {
       mac: _mac.text.trim().toUpperCase(),
       epgUrl: _epg.text.trim(),
       userAgent: _ua.text.trim(),
+      serial: _kind == SourceKind.stalker ? _serial.text.trim() : '',
+      deviceId: _kind == SourceKind.stalker ? _deviceId.text.trim() : '',
+      deviceId2: _kind == SourceKind.stalker ? _deviceId2.text.trim() : '',
+      signature: _kind == SourceKind.stalker ? _signature.text.trim() : '',
+      stbModel: _kind == SourceKind.stalker ? _stbModel.text.trim() : '',
       addedAt: widget.existing?.addedAt,
     );
     final ok = await session.connect(profile);
@@ -277,7 +307,32 @@ class _AddPlaylistFormState extends State<AddPlaylistForm> {
                     ),
                   ),
                 ],
-                if (_kind == SourceKind.stalker) _field(_mac, 'MAC address', hint: '00:1A:79:XX:XX:XX'),
+                if (_kind == SourceKind.stalker) ...[
+                  _field(_mac, 'MAC address', hint: '00:1A:79:XX:XX:XX'),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => setState(() => _deviceIds = !_deviceIds),
+                      icon: Icon(_deviceIds ? Icons.expand_less_rounded : Icons.expand_more_rounded),
+                      label: const Text('Device IDs (serial, device ID, signature)'),
+                    ),
+                  ),
+                  if (_deviceIds) ...[
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        'Only needed when your provider locked the account to a box. '
+                        'Copy them from the box\'s System info screen. Leave empty to generate them from the MAC.',
+                        style: TextStyle(color: Brand.textSecondary, fontSize: 13),
+                      ),
+                    ),
+                    _field(_serial, 'Serial number (SN)', hint: 'e.g. 062014N012345'),
+                    _field(_deviceId, 'Device ID', hint: 'From the box, if your provider needs it'),
+                    _field(_deviceId2, 'Device ID 2', hint: 'From the box, if your provider needs it'),
+                    _field(_signature, 'Signature', hint: 'From the box, if your provider needs it'),
+                    _field(_stbModel, 'STB model', hint: 'MAG250 (default), MAG254, MAG322…'),
+                  ],
+                ],
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(

@@ -25,6 +25,12 @@ class Session extends ChangeNotifier {
   EpgGuide guide = EpgGuide.empty;
   bool guideLoading = false;
 
+  /// Items per category (and the total under [Category.allId]) for each content type,
+  /// filled in the background after connecting.
+  final counts = <ContentType, Map<String, int>>{};
+
+  int? total(ContentType t) => counts[t]?[Category.allId];
+
   final _epgCache = <String, ({DateTime at, List<EpgProgram> list})>{};
   Timer? _keepAlive;
 
@@ -47,6 +53,7 @@ class Session extends ChangeNotifier {
       }
       notifyListeners();
       unawaited(_loadGuide());
+      unawaited(_loadCounts(s));
       return true;
     } catch (e) {
       s.dispose();
@@ -64,6 +71,7 @@ class Session extends ChangeNotifier {
     source = null;
     account = null;
     guide = EpgGuide.empty;
+    counts.clear();
     _epgCache.clear();
     state = SessionState.idle;
   }
@@ -88,6 +96,23 @@ class Session extends ChangeNotifier {
     } finally {
       guideLoading = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> _loadCounts(IptvSource s) async {
+    for (final type in ContentType.values) {
+      if (type == ContentType.movie && !s.features.contains(SourceFeature.movies)) continue;
+      if (type == ContentType.series && !s.features.contains(SourceFeature.series)) continue;
+      try {
+        final c = await s.categoryCounts(type);
+        if (source != s) return;
+        if (c != null) {
+          counts[type] = c;
+          notifyListeners();
+        }
+      } catch (e) {
+        debugPrint('Counting $type failed: $e');
+      }
     }
   }
 

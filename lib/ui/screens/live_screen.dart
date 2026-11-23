@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/models.dart';
 import '../../data/library_store.dart';
 import '../../state/session.dart';
+import '../platform.dart';
 import '../player/player_screen.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -27,6 +28,9 @@ class _LiveScreenState extends State<LiveScreen> {
   String? _error;
   final _filter = TextEditingController();
 
+  /// Plays the picked channel in the preview pane; full screen reuses it.
+  PlayerController? _preview;
+
   @override
   void initState() {
     super.initState();
@@ -36,6 +40,7 @@ class _LiveScreenState extends State<LiveScreen> {
   @override
   void dispose() {
     _filter.dispose();
+    _preview?.dispose();
     super.dispose();
   }
 
@@ -91,13 +96,40 @@ class _LiveScreenState extends State<LiveScreen> {
     return q.isEmpty ? list : list.where((c) => c.name.toLowerCase().contains(q)).toList();
   }
 
+  /// First pick plays the channel in the preview; picking the playing channel again
+  /// (OK twice on a remote) opens it full screen.
   void _play(Channel c) {
+    final p = _preview;
+    if (p != null && p.channel?.id == c.id) {
+      _openFullscreen();
+      return;
+    }
     final list = _visibleChannels;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PlayerScreen(request: PlayRequest.live(list, list.indexOf(c).clamp(0, list.length - 1))),
-      ),
-    );
+    final request = PlayRequest.live(list, list.indexOf(c).clamp(0, list.length - 1));
+    if (p == null) {
+      setState(() {
+        _preview = PlayerController(
+          session: context.read<Session>(),
+          store: context.read<LibraryStore>(),
+          request: request,
+        );
+      });
+    } else {
+      p.replace(request);
+    }
+    setState(() => _focused = c);
+  }
+
+  void _openFullscreen() {
+    final p = _preview;
+    if (p == null) return;
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(controller: p)));
+  }
+
+  void _stopPreview() {
+    final p = _preview;
+    setState(() => _preview = null);
+    p?.dispose();
   }
 
   void _toggleFavorite(Channel c) {
@@ -123,28 +155,44 @@ class _LiveScreenState extends State<LiveScreen> {
     if (cats == null) return const LoadingView(message: 'Loading channels…');
 
     final store = context.watch<LibraryStore>();
-    final profileId = context.read<Session>().profile!.id;
+    final session = context.watch<Session>();
+    final profileId = session.profile!.id;
+    final counts = session.counts[ContentType.live];
     final visibleCats = Parental.visible(store, profileId, cats);
-    final entries = <(String, String, bool)>[
-      (Category.allId, 'All channels', false),
-      (_favoritesId, 'Favorites', false),
-      for (final c in visibleCats) (c.id, c.name, Parental.isLocked(store, profileId, c)),
+    final entries = <(String, String, bool, int?)>[
+      (Category.allId, 'All channels', false, counts?[Category.allId]),
+      (_favoritesId, 'Favorites', false, store.favorites(profileId, ContentType.live).length),
+      for (final c in visibleCats) (c.id, c.name, Parental.isLocked(store, profileId, c), counts?[c.id]),
     ];
 
     final width = MediaQuery.sizeOf(context).width;
     final wide = width >= 900;
-    final channelList = _ChannelList(
-      channels: _visibleChannels,
-      loading: _channels == null,
-      profileId: profileId,
-      onPlay: _play,
-      onFavorite: _toggleFavorite,
-      onFocus: (c) => setState(() => _focused = c),
+    final preview = _preview;
+    final visible = _visibleChannels;
+    final channelList = ListenableBuilder(
+      listenable: preview ?? ValueNotifier(0),
+      builder: (_, _) => _ChannelList(
+        channels: visible,
+        loading: _channels == null,
+        profileId: profileId,
+        playingId: preview?.channel?.id,
+        onPlay: _play,
+        onFavorite: _toggleFavorite,
+        onFocus: (c) => setState(() => _focused = c),
+      ),
     );
+    final header = _ListHeader(
+      title: entries.firstWhere((e) => e.$1 == _categoryId, orElse: () => entries.first).$2,
+      count: _channels == null ? null : visible.length,
+    );
+    final previewPane = preview == null
+        ? null
+        : _LivePreview(controller: preview, onFullscreen: _openFullscreen, onClose: _stopPreview);
 
     if (!wide) {
       return Column(
         children: [
+          if (previewPane != null) AspectRatio(aspectRatio: 16 / 9, child: previewPane),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
             child: _SearchField(controller: _filter, onChanged: () => setState(() {})),
@@ -155,11 +203,11 @@ class _LiveScreenState extends State<LiveScreen> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 12),
               children: [
-                for (final (id, name, locked) in entries)
+                for (final (id, name, locked, count) in entries)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ChoiceChip(
-                      label: Text(locked ? '🔒 $name' : name),
+                      label: Text('${locked ? '🔒 ' : ''}$name${count != null ? '  ${formatCount(count)}' : ''}'),
                       selected: id == _categoryId,
                       onSelected: (_) => _openCategory(id),
                     ),
@@ -167,21 +215,24 @@ class _LiveScreenState extends State<LiveScreen> {
               ],
             ),
           ),
+          header,
           Expanded(child: channelList),
         ],
       );
     }
 
+    final showSide = preview != null || width >= 1150;
+    final playing = preview?.channel;
     return Row(
       children: [
         SizedBox(
-          width: 260,
+          width: width >= 1300 ? 260 : 220,
           child: FocusTraversalGroup(
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
               itemCount: entries.length,
               itemBuilder: (_, i) {
-                final (id, name, locked) = entries[i];
+                final (id, name, locked, count) = entries[i];
                 final sel = id == _categoryId;
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
@@ -211,7 +262,10 @@ class _LiveScreenState extends State<LiveScreen> {
                               ),
                             ),
                           ),
-                          if (locked) const Icon(Icons.lock_rounded, size: 16, color: Brand.textMuted),
+                          if (locked)
+                            const Icon(Icons.lock_rounded, size: 16, color: Brand.textMuted)
+                          else if (count != null)
+                            CountBadge(count: count, selected: sel),
                         ],
                       ),
                     ),
@@ -223,24 +277,195 @@ class _LiveScreenState extends State<LiveScreen> {
         ),
         const VerticalDivider(width: 1),
         Expanded(
-          flex: 5,
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 child: _SearchField(controller: _filter, onChanged: () => setState(() {})),
               ),
+              header,
               Expanded(child: FocusTraversalGroup(child: channelList)),
             ],
           ),
         ),
-        if (width >= 1150) ...[
+        if (showSide) ...[
           const VerticalDivider(width: 1),
-          SizedBox(width: 380, child: _GuidePanel(channel: _focused)),
+          SizedBox(
+            width: width >= 1400 ? 520 : (width >= 1150 ? 440 : 380),
+            child: Column(
+              children: [
+                if (previewPane != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: AspectRatio(aspectRatio: 16 / 9, child: previewPane),
+                    ),
+                  ),
+                Expanded(
+                  child: _GuidePanel(channel: _focused ?? playing, compact: previewPane != null),
+                ),
+              ],
+            ),
+          ),
         ],
       ],
     );
   }
+}
+
+/// Category title with the number of channels in it.
+class _ListHeader extends StatelessWidget {
+  const _ListHeader({required this.title, required this.count});
+
+  final String title;
+  final int? count;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(18, 10, 18, 6),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontFamily: Brand.headingFont, fontSize: 16),
+          ),
+        ),
+        if (count != null)
+          Text(
+            '${formatCount(count!)} ${count == 1 ? 'channel' : 'channels'}',
+            style: const TextStyle(color: Brand.textSecondary, fontSize: 13),
+          ),
+      ],
+    ),
+  );
+}
+
+/// The small player beside the channel list. Tap or the full screen button to go big.
+class _LivePreview extends StatefulWidget {
+  const _LivePreview({required this.controller, required this.onFullscreen, required this.onClose});
+
+  final PlayerController controller;
+  final VoidCallback onFullscreen;
+  final VoidCallback onClose;
+
+  @override
+  State<_LivePreview> createState() => _LivePreviewState();
+}
+
+class _LivePreviewState extends State<_LivePreview> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.controller;
+    return ListenableBuilder(
+      listenable: c,
+      builder: (context, _) {
+        final channel = c.channel;
+        final showBar = _hover || !AppPlatform.isDesktop || c.stage != PlayStage.playing;
+        return MouseRegion(
+          onEnter: (_) => setState(() => _hover = true),
+          onExit: (_) => setState(() => _hover = false),
+          child: GestureDetector(
+            onTap: widget.onFullscreen,
+            onDoubleTap: widget.onFullscreen,
+            child: Container(
+              color: Colors.black,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // While the full screen player shows this stream, only it draws the video.
+                  if (!c.fullscreenActive) PlayerVideo(controller: c),
+                  if (!c.fullscreenActive) PlayerStatusOverlay(controller: c, compact: true),
+                  if (c.fullscreenActive)
+                    const Center(
+                      child: Text('Playing full screen', style: TextStyle(color: Brand.textMuted)),
+                    ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: AnimatedOpacity(
+                      opacity: showBar ? 1 : 0,
+                      duration: const Duration(milliseconds: 160),
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(12, 18, 4, 2),
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Color(0x00000000), Color(0xCC000000)],
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(color: Brand.error, borderRadius: BorderRadius.circular(4)),
+                              child: const Text('LIVE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                channel?.name ?? c.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                              ),
+                            ),
+                            _PreviewButton(
+                              icon: c.muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                              tooltip: c.muted ? 'Unmute' : 'Mute',
+                              onPressed: c.toggleMute,
+                            ),
+                            _PreviewButton(icon: Icons.close_rounded, tooltip: 'Stop', onPressed: widget.onClose),
+                            _PreviewButton(
+                              icon: Icons.fullscreen_rounded,
+                              tooltip: 'Full screen',
+                              onPressed: widget.onFullscreen,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _PreviewButton extends StatelessWidget {
+  const _PreviewButton({required this.icon, required this.tooltip, required this.onPressed});
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: tooltip,
+    iconSize: 22,
+    visualDensity: VisualDensity.compact,
+    onPressed: onPressed,
+    style: ButtonStyle(
+      backgroundColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.focused) ? Brand.cyberMint : Colors.transparent,
+      ),
+      foregroundColor: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.focused) ? Brand.deepVoid : Colors.white,
+      ),
+    ),
+    icon: Icon(icon),
+  );
 }
 
 class _SearchField extends StatelessWidget {
@@ -266,6 +491,7 @@ class _ChannelList extends StatelessWidget {
     required this.channels,
     required this.loading,
     required this.profileId,
+    this.playingId,
     required this.onPlay,
     required this.onFavorite,
     required this.onFocus,
@@ -274,6 +500,7 @@ class _ChannelList extends StatelessWidget {
   final List<Channel> channels;
   final bool loading;
   final String profileId;
+  final String? playingId;
   final ValueChanged<Channel> onPlay;
   final ValueChanged<Channel> onFavorite;
   final ValueChanged<Channel> onFocus;
@@ -292,10 +519,12 @@ class _ChannelList extends StatelessWidget {
       itemBuilder: (_, i) {
         final c = channels[i];
         final fav = store.isFavorite(profileId, ContentType.live, c.id);
+        final playing = c.id == playingId;
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 3),
           child: TvFocusable(
             autofocus: i == 0,
+            selected: playing,
             borderRadius: 12,
             scale: 1.015,
             onSelect: () => onPlay(c),
@@ -304,7 +533,7 @@ class _ChannelList extends StatelessWidget {
               if (f) onFocus(c);
             },
             child: Container(
-              color: Brand.surfaceCard,
+              color: playing ? Brand.cyberMint.withValues(alpha: 0.10) : Brand.surfaceCard,
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
                 children: [
@@ -329,9 +558,14 @@ class _ChannelList extends StatelessWidget {
                       c.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      style: TextStyle(fontWeight: FontWeight.w600, color: playing ? Brand.cyberMint : null),
                     ),
                   ),
+                  if (playing)
+                    const Padding(
+                      padding: EdgeInsets.only(left: 6),
+                      child: Icon(Icons.equalizer_rounded, size: 18, color: Brand.cyberMint),
+                    ),
                   if (c.hasCatchup)
                     const Padding(
                       padding: EdgeInsets.only(left: 6),
@@ -354,15 +588,22 @@ class _ChannelList extends StatelessWidget {
 
 /// Now / next guide for the focused channel.
 class _GuidePanel extends StatelessWidget {
-  const _GuidePanel({required this.channel});
+  const _GuidePanel({required this.channel, this.compact = false});
 
   final Channel? channel;
+
+  /// Under the preview there is less room, so the header is smaller.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final c = channel;
     if (c == null) {
-      return const MessageView(icon: Icons.tv_rounded, title: 'Pick a channel', subtitle: 'Its TV guide shows here.');
+      return const MessageView(
+        icon: Icons.tv_rounded,
+        title: 'Pick a channel',
+        subtitle: 'It plays here, with its TV guide below. Pick it again for full screen.',
+      );
     }
     final session = context.read<Session>();
     return FutureBuilder<List<EpgProgram>>(
@@ -372,7 +613,7 @@ class _GuidePanel extends StatelessWidget {
         final programs = snap.data ?? const [];
         final now = DateTime.now();
         return ListView(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.all(compact ? 16 : 20),
           children: [
             Row(
               children: [

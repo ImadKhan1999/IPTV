@@ -25,10 +25,11 @@ void main() {
   group('session', () {
     late List<http.Request> requests;
     late StalkerSource source;
+    late MockClient client;
 
     setUp(() {
       requests = [];
-      final client = MockClient((req) async {
+      client = MockClient((req) async {
         requests.add(req);
         final q = req.url.queryParameters;
         if (req.url.path.endsWith('portal.php') && q['action'] == 'handshake') {
@@ -134,6 +135,46 @@ void main() {
       await source.connect();
       final movies = await source.movies(Category.allId);
       expect(movies.map((m) => m.id), ['m1', 'm2', 'm3']);
+    });
+
+    test('sends the serial, device IDs, signature and model the user entered', () async {
+      final custom = StalkerSource(
+        PlaylistProfile(
+          id: 's2',
+          name: 'S2',
+          kind: SourceKind.stalker,
+          url: 'http://portal.tv/c/',
+          mac: '00:1A:79:12:34:56',
+          serial: '062014N012345',
+          deviceId: 'AA' * 32,
+          deviceId2: 'BB' * 32,
+          signature: 'CC' * 32,
+          stbModel: 'mag322',
+        ),
+        client: client,
+      );
+      await custom.connect();
+      final q = requests.firstWhere((r) => r.url.queryParameters['action'] == 'get_profile');
+      expect(q.url.queryParameters['sn'], '062014N012345');
+      expect(q.url.queryParameters['device_id'], 'AA' * 32);
+      expect(q.url.queryParameters['device_id2'], 'BB' * 32);
+      expect(q.url.queryParameters['signature'], 'CC' * 32);
+      expect(q.url.queryParameters['stb_type'], 'MAG322');
+      expect(q.headers['X-User-Agent'], contains('MAG322'));
+    });
+
+    test('derives stable IDs from the MAC when none are entered', () async {
+      await source.connect();
+      final q = requests.firstWhere((r) => r.url.queryParameters['action'] == 'get_profile');
+      expect(q.url.queryParameters['device_id'], hasLength(64));
+      expect(q.url.queryParameters['device_id'], q.url.queryParameters['device_id2']);
+      expect(q.url.queryParameters['stb_type'], 'MAG250');
+    });
+
+    test('counts channels per genre and the VOD total', () async {
+      await source.connect();
+      expect(await source.categoryCounts(ContentType.live), {'10': 2, Category.allId: 2});
+      expect(await source.categoryCounts(ContentType.movie), {Category.allId: 3});
     });
   });
 }

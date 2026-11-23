@@ -19,9 +19,20 @@ class StalkerSource extends IptvSource {
   List<Channel>? _allChannels;
 
   String get mac => profile.mac.trim().toUpperCase();
-  String get serial => md5.convert(utf8.encode(mac)).toString().toUpperCase().substring(0, 13);
-  String get deviceId => sha256.convert(utf8.encode(mac)).toString().toUpperCase();
-  String get signature => sha256.convert(utf8.encode('$serial$mac')).toString().toUpperCase();
+
+  /// Serial number, device IDs and signature: the user's values when the portal needs the
+  /// real box identity, otherwise derived from the MAC the way MAG firmware does.
+  String get serial => profile.serial.trim().isNotEmpty
+      ? profile.serial.trim()
+      : md5.convert(utf8.encode(mac)).toString().toUpperCase().substring(0, 13);
+  String get deviceId => profile.deviceId.trim().isNotEmpty
+      ? profile.deviceId.trim()
+      : sha256.convert(utf8.encode(mac)).toString().toUpperCase();
+  String get deviceId2 => profile.deviceId2.trim().isNotEmpty ? profile.deviceId2.trim() : deviceId;
+  String get signature => profile.signature.trim().isNotEmpty
+      ? profile.signature.trim()
+      : sha256.convert(utf8.encode('$serial$mac')).toString().toUpperCase();
+  String get model => profile.stbModel.trim().isNotEmpty ? profile.stbModel.trim().toUpperCase() : 'MAG250';
 
   @override
   Set<SourceFeature> get features => {
@@ -46,7 +57,7 @@ class StalkerSource extends IptvSource {
 
   Map<String, String> get _headers => {
     'User-Agent': profile.userAgent.isNotEmpty ? profile.userAgent : _stbUserAgent,
-    'X-User-Agent': 'Model: MAG250; Link: WiFi',
+    'X-User-Agent': 'Model: $model; Link: WiFi',
     'Referer': '${normalizeServerUrl(profile.url)}/',
     'Accept': '*/*',
     'Cookie': 'mac=${Uri.encodeComponent(mac)}; stb_lang=en; timezone=${Uri.encodeComponent(_timezone)}',
@@ -106,12 +117,12 @@ class StalkerSource extends IptvSource {
         'ver': 'ImageDescription: 0.2.18-r23-250; ImageDate: Thu Sep 13 11:31:16 EEST 2018; PORTAL version: 5.6.2; API Version: JS API version: 343; STB API version: 146; Player Engine version: 0x58c',
         'num_banks': '2',
         'sn': serial,
-        'stb_type': 'MAG250',
+        'stb_type': model,
         'client_type': 'STB',
         'image_version': '218',
         'video_out': 'hdmi',
         'device_id': deviceId,
-        'device_id2': deviceId,
+        'device_id2': deviceId2,
         'signature': signature,
         'auth_second_step': '1',
         'hw_version': '1.7-BD-00',
@@ -199,6 +210,19 @@ class StalkerSource extends IptvSource {
   Future<List<Channel>> channels(String categoryId) async {
     final all = await _loadAllChannels();
     return categoryId == Category.allId ? all : all.where((c) => c.categoryId == categoryId).toList();
+  }
+
+  @override
+  Future<Map<String, int>?> categoryCounts(ContentType type) async {
+    if (type == ContentType.live) {
+      return IptvSource.countByCategory((await _loadAllChannels()).map((c) => c.categoryId));
+    }
+    // VOD lists are paged; the first page reports the total, so only the total is counted.
+    final js = jMap(
+      await _call({'type': type == ContentType.movie ? 'vod' : 'series', 'action': 'get_ordered_list', 'p': '1'}),
+    );
+    final total = jInt(js['total_items']);
+    return total == null ? null : {Category.allId: total};
   }
 
   /// Pages through `get_ordered_list` (VOD and series lists are paginated, 14 per page).

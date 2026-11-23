@@ -139,6 +139,13 @@ class M3uSource extends IptvSource {
   };
 
   @override
+  Future<Map<String, int>?> categoryCounts(ContentType type) async => IptvSource.countByCategory(switch (type) {
+    ContentType.live => _channels.map((c) => c.categoryId),
+    ContentType.movie => _movies.map((m) => m.categoryId),
+    ContentType.series => _series.values.map((s) => s.series.categoryId),
+  });
+
+  @override
   Future<List<Channel>> channels(String categoryId) async =>
       categoryId == Category.allId ? List.of(_channels) : _channels.where((c) => c.categoryId == categoryId).toList();
 

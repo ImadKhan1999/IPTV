@@ -106,6 +106,13 @@ class _SideRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<LibraryStore>();
+    final session = context.watch<Session>();
+    int? countFor(Section s) => switch (s) {
+      Section.live => session.total(ContentType.live),
+      Section.movies => session.total(ContentType.movie),
+      Section.series => session.total(ContentType.series),
+      _ => null,
+    };
     return Container(
       width: 220,
       color: Brand.slateObsidian,
@@ -157,6 +164,7 @@ class _SideRail extends StatelessWidget {
                               ),
                             ),
                           ),
+                          if (countFor(s) case final n?) CountBadge(count: n, selected: s == current),
                         ],
                       ),
                     ),

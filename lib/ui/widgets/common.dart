@@ -346,3 +346,41 @@ String formatDuration(Duration d) {
   final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
   return h > 0 ? '$h:$m:$s' : '$m:$s';
 }
+
+/// 12345 → "12,345".
+String formatCount(int n) {
+  final s = n.abs().toString();
+  final b = StringBuffer(n < 0 ? '-' : '');
+  for (var i = 0; i < s.length; i++) {
+    if (i > 0 && (s.length - i) % 3 == 0) b.write(',');
+    b.write(s[i]);
+  }
+  return b.toString();
+}
+
+/// Small pill with an item count, used in category lists and the side rail.
+class CountBadge extends StatelessWidget {
+  const CountBadge({super.key, required this.count, this.selected = false});
+
+  final int count;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(left: 8),
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+    decoration: BoxDecoration(
+      color: selected ? Brand.cyberMint.withValues(alpha: 0.18) : Brand.surfaceHover,
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Text(
+      formatCount(count),
+      style: TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        color: selected ? Brand.cyberMint : Brand.textMuted,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+    ),
+  );
+}

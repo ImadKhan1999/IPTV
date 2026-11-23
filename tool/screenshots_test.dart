@@ -68,13 +68,17 @@ void main() {
     await expectLater(find.byType(MaterialApp), matchesGoldenFile('../docs/screenshots/$name.png'));
   }
 
-  (LibraryStore, Session) connected() {
+  Future<(LibraryStore, Session)> connected() async {
     final store = LibraryStore.memory();
     final profile = PlaylistProfile(id: 'p', name: 'My Provider', kind: SourceKind.m3u, url: 'x');
     store.upsertProfile(profile);
+    final source = M3uSource(profile)..loadFromText(_m3u.toString());
     final session = Session(store)
-      ..source = (M3uSource(profile)..loadFromText(_m3u.toString()))
+      ..source = source
       ..state = SessionState.ready;
+    for (final type in ContentType.values) {
+      session.counts[type] = (await source.categoryCounts(type))!;
+    }
     return (store, session);
   }
 
@@ -89,7 +93,7 @@ void main() {
   testWidgets('welcome', (t) => shoot(t, const Size(1920, 1080), IptvApp(store: LibraryStore.memory()), 'welcome'));
 
   testWidgets('live tv', (t) async {
-    final (store, session) = connected();
+    final (store, session) = await connected();
     await shoot(
       t,
       const Size(1920, 1080),
@@ -104,7 +108,7 @@ void main() {
   });
 
   testWidgets('movies', (t) async {
-    final (store, session) = connected();
+    final (store, session) = await connected();
     await shoot(
       t,
       const Size(1920, 1080),
@@ -120,7 +124,7 @@ void main() {
   });
 
   testWidgets('phone', (t) async {
-    final (store, session) = connected();
+    final (store, session) = await connected();
     await shoot(t, const Size(420, 900), wrap(store, session), 'phone-live');
   });
 }

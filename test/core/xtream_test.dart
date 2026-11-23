@@ -88,6 +88,20 @@ void main() {
     expect(requests.single.queryParameters['category_id'], '3');
   });
 
+  test('counts streams per category and reuses the full list', () async {
+    final s = source({
+      'get_live_streams': [
+        {'name': 'A', 'stream_id': 1, 'category_id': '3'},
+        {'name': 'B', 'stream_id': 2, 'category_id': '3'},
+        {'name': 'C', 'stream_id': 3, 'category_id': '4'},
+      ],
+    });
+    expect(await s.categoryCounts(ContentType.live), {'3': 2, '4': 1, Category.allId: 3});
+    final inThree = await s.channels('3');
+    expect(inThree.map((c) => c.name), ['A', 'B']);
+    expect(requests, hasLength(1)); // filtered from the cached full list
+  });
+
   test('caches lists', () async {
     final s = source({
       'get_live_categories': [

@@ -97,11 +97,30 @@ class XtreamSource extends IptvSource {
     ];
   });
 
+  /// When the full list is already loaded (for counts or search), filter it locally instead of
+  /// asking the server again.
+  List<T>? _fromFullList<T>(String kind, String categoryId, String Function(T) categoryOf) {
+    if (categoryId == Category.allId) return null;
+    final all = _cache['$kind:${Category.allId}'];
+    if (all is! List<T>) return null;
+    return all.where((e) => categoryOf(e) == categoryId).toList();
+  }
+
+  @override
+  Future<Map<String, int>?> categoryCounts(ContentType type) async => switch (type) {
+    ContentType.live => IptvSource.countByCategory((await channels(Category.allId)).map((c) => c.categoryId)),
+    ContentType.movie => IptvSource.countByCategory((await movies(Category.allId)).map((m) => m.categoryId)),
+    ContentType.series => IptvSource.countByCategory((await series(Category.allId)).map((s) => s.categoryId)),
+  };
+
   Map<String, String> _catParam(String categoryId) =>
       categoryId == Category.allId ? const {} : {'category_id': categoryId};
 
   @override
-  Future<List<Channel>> channels(String categoryId) => _cached('live:$categoryId', () async {
+  Future<List<Channel>> channels(String categoryId) async =>
+      _fromFullList<Channel>('live', categoryId, (c) => c.categoryId) ?? await _channels(categoryId);
+
+  Future<List<Channel>> _channels(String categoryId) => _cached('live:$categoryId', () async {
     final list = jList(await _get({'action': 'get_live_streams', ..._catParam(categoryId)}));
     return [
       for (final s in list)
@@ -120,7 +139,10 @@ class XtreamSource extends IptvSource {
   });
 
   @override
-  Future<List<Movie>> movies(String categoryId) => _cached('vod:$categoryId', () async {
+  Future<List<Movie>> movies(String categoryId) async =>
+      _fromFullList<Movie>('vod', categoryId, (m) => m.categoryId) ?? await _movies(categoryId);
+
+  Future<List<Movie>> _movies(String categoryId) => _cached('vod:$categoryId', () async {
     final list = jList(await _get({'action': 'get_vod_streams', ..._catParam(categoryId)}));
     return [
       for (final s in list)
@@ -143,7 +165,10 @@ class XtreamSource extends IptvSource {
       jMap(jMap(await _get({'action': 'get_vod_info', 'vod_id': movie.id}))['info']);
 
   @override
-  Future<List<Series>> series(String categoryId) => _cached('series:$categoryId', () async {
+  Future<List<Series>> series(String categoryId) async =>
+      _fromFullList<Series>('series', categoryId, (s) => s.categoryId) ?? await _series(categoryId);
+
+  Future<List<Series>> _series(String categoryId) => _cached('series:$categoryId', () async {
     final list = jList(await _get({'action': 'get_series', ..._catParam(categoryId)}));
     return [
       for (final s in list)

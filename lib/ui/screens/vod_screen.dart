@@ -98,9 +98,36 @@ class _VodScreenState extends State<VodScreen> {
     final cats = _categories;
     if (cats == null) return const LoadingView();
     final store = context.watch<LibraryStore>();
-    final profileId = context.read<Session>().profile!.id;
+    final session = context.watch<Session>();
+    final profileId = session.profile!.id;
     final visible = Parental.visible(store, profileId, cats);
     final wide = MediaQuery.sizeOf(context).width >= 900;
+    final counts = session.counts[widget.type];
+    final noun = widget.type == ContentType.movie ? 'movies' : 'series';
+    final total = counts?[Category.allId];
+    final shown = _items == null ? null : _visibleItems.length;
+    final header = Padding(
+      padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              visible.where((c) => c.id == _categoryId).firstOrNull?.name ?? '',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700, fontFamily: Brand.headingFont, fontSize: 16),
+            ),
+          ),
+          Text(
+            [
+              if (shown != null) '${formatCount(shown)} $noun here',
+              if (total != null) '${formatCount(total)} in total',
+            ].join('  ·  '),
+            style: const TextStyle(color: Brand.textSecondary, fontSize: 13),
+          ),
+        ],
+      ),
+    );
 
     final grid = _PosterGrid(items: _visibleItems, loading: _items == null, type: widget.type);
     final search = TextField(
@@ -127,7 +154,10 @@ class _VodScreenState extends State<VodScreen> {
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ChoiceChip(
-                      label: Text(Parental.isLocked(store, profileId, c) ? '🔒 ${c.name}' : c.name),
+                      label: Text(
+                        '${Parental.isLocked(store, profileId, c) ? '🔒 ' : ''}${c.name}'
+                        '${counts?[c.id] != null ? '  ${formatCount(counts![c.id]!)}' : ''}',
+                      ),
                       selected: c.id == _categoryId,
                       onSelected: (_) => _open(c.id),
                     ),
@@ -135,6 +165,7 @@ class _VodScreenState extends State<VodScreen> {
               ],
             ),
           ),
+          header,
           Expanded(child: grid),
         ],
       );
@@ -172,7 +203,9 @@ class _VodScreenState extends State<VodScreen> {
                             ),
                           ),
                           if (Parental.isLocked(store, profileId, c))
-                            const Icon(Icons.lock_rounded, size: 16, color: Brand.textMuted),
+                            const Icon(Icons.lock_rounded, size: 16, color: Brand.textMuted)
+                          else if (counts?[c.id] case final n?)
+                            CountBadge(count: n, selected: sel),
                         ],
                       ),
                     ),
@@ -186,7 +219,8 @@ class _VodScreenState extends State<VodScreen> {
         Expanded(
           child: Column(
             children: [
-              Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 8), child: search),
+              Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 0), child: search),
+              header,
               Expanded(child: FocusTraversalGroup(child: grid)),
             ],
           ),

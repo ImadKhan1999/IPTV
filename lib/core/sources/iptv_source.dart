@@ -40,6 +40,23 @@ abstract class IptvSource {
 
   Future<PlayableStream> resolveEpisode(Episode episode);
 
+  /// How many items each category holds, keyed by category id, with the overall total under
+  /// [Category.allId]. A source may return only the total, or null when counting would mean
+  /// downloading everything.
+  Future<Map<String, int>?> categoryCounts(ContentType type) async => null;
+
+  /// Counts items per category id and adds the total under [Category.allId].
+  static Map<String, int> countByCategory(Iterable<String> categoryIds) {
+    final out = <String, int>{};
+    var total = 0;
+    for (final id in categoryIds) {
+      out[id] = (out[id] ?? 0) + 1;
+      total++;
+    }
+    out[Category.allId] = total;
+    return out;
+  }
+
   /// Catch-up (timeshift) URL for a past programme, or null when unsupported.
   Future<PlayableStream?> resolveCatchup(Channel channel, EpgProgram program) async => null;
 

@@ -23,6 +23,11 @@ class PlaylistProfile {
     this.username = '',
     this.password = '',
     this.mac = '',
+    this.serial = '',
+    this.deviceId = '',
+    this.deviceId2 = '',
+    this.signature = '',
+    this.stbModel = '',
     this.epgUrl = '',
     this.userAgent = '',
     DateTime? addedAt,
@@ -40,33 +45,22 @@ class PlaylistProfile {
   /// Stalker MAC address (00:1A:79:XX:XX:XX).
   final String mac;
 
+  /// Stalker device identity. Some portals bind a subscription to the box's serial number,
+  /// device IDs and signature as well as the MAC; leave empty to derive them from the MAC.
+  final String serial;
+  final String deviceId;
+  final String deviceId2;
+  final String signature;
+
+  /// Stalker STB model reported to the portal (MAG250, MAG254, MAG322...). Empty means MAG250.
+  final String stbModel;
+
   /// Optional XMLTV guide URL that overrides the one the source provides.
   final String epgUrl;
 
   /// Optional custom User-Agent for every request and stream.
   final String userAgent;
   final DateTime addedAt;
-
-  PlaylistProfile copyWith({
-    String? name,
-    String? url,
-    String? username,
-    String? password,
-    String? mac,
-    String? epgUrl,
-    String? userAgent,
-  }) => PlaylistProfile(
-    id: id,
-    name: name ?? this.name,
-    kind: kind,
-    url: url ?? this.url,
-    username: username ?? this.username,
-    password: password ?? this.password,
-    mac: mac ?? this.mac,
-    epgUrl: epgUrl ?? this.epgUrl,
-    userAgent: userAgent ?? this.userAgent,
-    addedAt: addedAt,
-  );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -76,23 +70,36 @@ class PlaylistProfile {
     'username': username,
     'password': password,
     'mac': mac,
+    'serial': serial,
+    'deviceId': deviceId,
+    'deviceId2': deviceId2,
+    'signature': signature,
+    'stbModel': stbModel,
     'epgUrl': epgUrl,
     'userAgent': userAgent,
     'addedAt': addedAt.toIso8601String(),
   };
 
-  factory PlaylistProfile.fromJson(Map<String, dynamic> j) => PlaylistProfile(
-    id: j['id'] as String,
-    name: j['name'] as String? ?? 'Playlist',
-    kind: SourceKind.values.firstWhere((k) => k.name == j['kind'], orElse: () => SourceKind.m3u),
-    url: j['url'] as String? ?? '',
-    username: j['username'] as String? ?? '',
-    password: j['password'] as String? ?? '',
-    mac: j['mac'] as String? ?? '',
-    epgUrl: j['epgUrl'] as String? ?? '',
-    userAgent: j['userAgent'] as String? ?? '',
-    addedAt: DateTime.tryParse(j['addedAt'] as String? ?? ''),
-  );
+  factory PlaylistProfile.fromJson(Map<String, dynamic> j) {
+    String str(String k) => j[k] as String? ?? '';
+    return PlaylistProfile(
+      id: j['id'] as String,
+      name: j['name'] as String? ?? 'Playlist',
+      kind: SourceKind.values.firstWhere((k) => k.name == j['kind'], orElse: () => SourceKind.m3u),
+      url: str('url'),
+      username: str('username'),
+      password: str('password'),
+      mac: str('mac'),
+      serial: str('serial'),
+      deviceId: str('deviceId'),
+      deviceId2: str('deviceId2'),
+      signature: str('signature'),
+      stbModel: str('stbModel'),
+      epgUrl: str('epgUrl'),
+      userAgent: str('userAgent'),
+      addedAt: DateTime.tryParse(str('addedAt')),
+    );
+  }
 }
 
 class Category {
