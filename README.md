@@ -17,7 +17,11 @@ iPTV plays the playlist from your own provider. It ships with no channels or con
 - **Movies and Series** with posters, ratings, plots, seasons and episodes, **resume where you left off**, and auto-play of the next episode.
 - **Catch-up / timeshift** for Xtream and M3U playlists that support it (`catchup`, `catchup-source`, flussonic and shift styles).
 - **Favorites, recently watched and Continue watching**, kept per playlist.
-- **Global search** across channels, movies and series.
+- **Search everywhere**: channels, movies, series and what's on in the TV guide, with words in any order and accents ignored. **Voice search** with the remote's mic on Android TV (and phones); the remote's search key or Ctrl+F jumps straight to it.
+- **Start with the last channel**: the app opens straight into what you watched last, playing (can be turned off).
+- **Your own channel groups** ("Sports", "News"…) in your own order, reorderable favorites, and **hidden channels**. Long-press a channel (or right-click) for the menu.
+- **Opens instantly**: playlists, lists and the TV guide are saved on the device and refreshed in the background on a schedule you choose; works offline from the saved copy.
+- **In-app updates**: checks GitHub releases once a day and installs the new version in one tap (the right APK for your device on Android, the installer on Windows).
 - **Several playlists**, switch between them in Settings.
 - **Parental control**: 4-digit PIN, lock any category, adult categories hidden or PIN-locked automatically.
 - **Player** built on libmpv (media_kit) with hardware decoding, big buffers and auto-reconnect for live streams. Centered play controls, **sound and brightness** controls (swipe on phones, mouse wheel on Windows), audio and subtitle track selection, aspect modes, picture-in-picture on Android phones, and full screen on Windows.

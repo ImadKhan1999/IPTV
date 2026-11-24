@@ -384,3 +384,25 @@ class CountBadge extends StatelessWidget {
     ),
   );
 }
+
+/// One-line text prompt (group names and similar). Returns null when cancelled.
+Future<String?> askText(BuildContext context, {required String title, String? hint, String initial = ''}) {
+  final c = TextEditingController(text: initial);
+  return showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(title),
+      content: TextField(
+        controller: c,
+        autofocus: true,
+        textInputAction: TextInputAction.done,
+        decoration: InputDecoration(hintText: hint),
+        onSubmitted: (v) => Navigator.pop(ctx, v),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Save')),
+      ],
+    ),
+  );
+}

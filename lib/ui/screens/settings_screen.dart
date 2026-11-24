@@ -3,10 +3,12 @@ import 'package:provider/provider.dart';
 
 import '../../core/models.dart';
 import '../../data/library_store.dart';
+import '../../data/updater.dart';
 import '../../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/parental.dart';
+import '../widgets/update_dialog.dart';
 import 'welcome_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -214,6 +216,38 @@ class SettingsScreen extends StatelessWidget {
           value: store.player.autoPlayNextEpisode,
           onChanged: (v) => store.updatePlayer(store.player.copyWith(autoPlayNextEpisode: v)),
         ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Start with the last channel'),
+          subtitle: const Text('Opening the app plays the channel you watched last, full screen.'),
+          value: store.player.startOnLastChannel,
+          onChanged: (v) => store.updatePlayer(store.player.copyWith(startOnLastChannel: v)),
+        ),
+
+        // Channels ------------------------------------------------------------------
+        const _Section('Channels'),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.folder_special_rounded),
+          title: const Text('Channel groups'),
+          subtitle: Text(
+            store.activeProfile == null
+                ? 'Make your own lists like Sports or News.'
+                : '${store.groups(store.activeProfile!.id).length} groups. Long-press a channel to add it to one.',
+          ),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const _GroupsScreen())),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.visibility_off_rounded),
+          title: const Text('Hidden channels'),
+          subtitle: Text(
+            store.activeProfile == null
+                ? 'Channels you hid from the lists.'
+                : '${store.hiddenIds(store.activeProfile!.id).length} hidden. Long-press a channel to hide it.',
+          ),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const _HiddenChannelsScreen())),
+        ),
 
         // Parental control -------------------------------------------------------
         const _Section('Parental control'),
@@ -290,11 +324,18 @@ class SettingsScreen extends StatelessWidget {
 
         // About ---------------------------------------------------------------------
         const _Section('About'),
-        const Row(
+        Row(
           children: [
-            AppLogo(size: 44),
-            SizedBox(width: 16),
-            Text('Version 1.0.0', style: TextStyle(color: Brand.textSecondary)),
+            const AppLogo(size: 44),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text('Version ${AppVersion.label}', style: const TextStyle(color: Brand.textSecondary)),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => checkForUpdates(context),
+              icon: const Icon(Icons.system_update_rounded),
+              label: const Text('Check for updates'),
+            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -398,4 +439,99 @@ String _ago(DateTime t) {
   if (d.inMinutes < 60) return '${d.inMinutes} min ago';
   if (d.inHours < 24) return '${d.inHours} h ago';
   return '${d.inDays} ${d.inDays == 1 ? 'day' : 'days'} ago';
+}
+
+/// Rename or delete the user's channel groups.
+class _GroupsScreen extends StatelessWidget {
+  const _GroupsScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.watch<LibraryStore>();
+    final profileId = store.activeProfile?.id;
+    final groups = profileId == null ? const <ChannelGroup>[] : store.groups(profileId);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Channel groups')),
+      body: groups.isEmpty
+          ? const MessageView(
+              icon: Icons.folder_special_rounded,
+              title: 'No groups yet',
+              subtitle: 'In Live TV, long-press a channel (or right-click) and choose "Add to a group".',
+            )
+          : ListView(
+              children: [
+                for (final (i, g) in groups.indexed)
+                  ListTile(
+                    autofocus: i == 0,
+                    leading: const Icon(Icons.folder_special_rounded, color: Brand.sky),
+                    title: Text(g.name),
+                    subtitle: Text('${g.channelIds.length} channels'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Rename',
+                          icon: const Icon(Icons.edit_rounded),
+                          onPressed: () async {
+                            final name = await askText(context, title: 'Rename group', initial: g.name);
+                            if (name != null && name.trim().isNotEmpty) await store.renameGroup(g, name);
+                          },
+                        ),
+                        IconButton(
+                          tooltip: 'Delete',
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          onPressed: () => store.deleteGroup(g),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
+}
+
+/// Lists hidden channels so they can be shown again.
+class _HiddenChannelsScreen extends StatelessWidget {
+  const _HiddenChannelsScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final store = context.watch<LibraryStore>();
+    final session = context.read<Session>();
+    final profileId = store.activeProfile?.id;
+    final hidden = profileId == null ? <String>{} : store.hiddenIds(profileId);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Hidden channels')),
+      body: hidden.isEmpty || session.source == null
+          ? const MessageView(
+              icon: Icons.visibility_rounded,
+              title: 'No hidden channels',
+              subtitle: 'In Live TV, long-press a channel (or right-click) and choose "Hide this channel".',
+            )
+          : FutureBuilder<List<Channel>>(
+              future: session.source!.channels(Category.allId),
+              builder: (context, snap) {
+                if (!snap.hasData) return const LoadingView();
+                final names = {for (final c in snap.data!) c.id: c};
+                final ids = hidden.toList();
+                return ListView(
+                  children: [
+                    for (final (i, id) in ids.indexed)
+                      ListTile(
+                        autofocus: i == 0,
+                        leading: SizedBox(width: 56, height: 36, child: NetImage(names[id]?.logo, fit: BoxFit.contain)),
+                        title: Text(names[id]?.name ?? 'Channel no longer in the playlist'),
+                        trailing: TextButton.icon(
+                          onPressed: () => store.setHidden(profileId!, id, false),
+                          icon: const Icon(Icons.visibility_rounded),
+                          label: const Text('Show'),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+    );
+  }
 }

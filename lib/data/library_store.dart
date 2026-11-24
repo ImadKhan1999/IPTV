@@ -173,6 +173,7 @@ class PlayerSettings {
     this.rememberPosition = true,
     this.liveFormat = 'ts',
     this.refreshHours = 24,
+    this.startOnLastChannel = true,
   });
 
   final bool hardwareDecoding;
@@ -185,6 +186,9 @@ class PlayerSettings {
   /// again (in the background). 0 means check on every launch.
   final int refreshHours;
 
+  /// Open straight into the channel watched last, playing.
+  final bool startOnLastChannel;
+
   PlayerSettings copyWith({
     bool? hardwareDecoding,
     int? bufferSeconds,
@@ -192,6 +196,7 @@ class PlayerSettings {
     bool? rememberPosition,
     String? liveFormat,
     int? refreshHours,
+    bool? startOnLastChannel,
   }) => PlayerSettings(
     hardwareDecoding: hardwareDecoding ?? this.hardwareDecoding,
     bufferSeconds: bufferSeconds ?? this.bufferSeconds,
@@ -199,6 +204,7 @@ class PlayerSettings {
     rememberPosition: rememberPosition ?? this.rememberPosition,
     liveFormat: liveFormat ?? this.liveFormat,
     refreshHours: refreshHours ?? this.refreshHours,
+    startOnLastChannel: startOnLastChannel ?? this.startOnLastChannel,
   );
 
   Map<String, dynamic> toJson() => {
@@ -208,6 +214,7 @@ class PlayerSettings {
     'rememberPosition': rememberPosition,
     'liveFormat': liveFormat,
     'refreshHours': refreshHours,
+    'startOnLastChannel': startOnLastChannel,
   };
 
   factory PlayerSettings.fromJson(Map<String, dynamic> j) => PlayerSettings(
@@ -217,6 +224,27 @@ class PlayerSettings {
     rememberPosition: j['rememberPosition'] as bool? ?? true,
     liveFormat: j['liveFormat'] as String? ?? 'ts',
     refreshHours: j['refreshHours'] as int? ?? 24,
+    startOnLastChannel: j['startOnLastChannel'] as bool? ?? true,
+  );
+}
+
+/// A user-made list of live channels ("Sports", "Kids"…), kept in the user's order.
+class ChannelGroup {
+  ChannelGroup({required this.id, required this.profileId, required this.name, List<String>? channelIds})
+    : channelIds = channelIds ?? [];
+
+  final String id;
+  final String profileId;
+  String name;
+  final List<String> channelIds;
+
+  Map<String, dynamic> toJson() => {'id': id, 'profileId': profileId, 'name': name, 'channelIds': channelIds};
+
+  factory ChannelGroup.fromJson(Map<String, dynamic> j) => ChannelGroup(
+    id: j['id'] as String,
+    profileId: j['profileId'] as String,
+    name: j['name'] as String? ?? 'Group',
+    channelIds: (j['channelIds'] as List? ?? []).cast<String>().toList(),
   );
 }
 
@@ -234,6 +262,12 @@ class LibraryStore extends ChangeNotifier {
   final Map<String, SavedItem> _favorites = {};
   final Map<String, SavedItem> _history = {};
   final Set<String> lockedCategories = {};
+  final List<ChannelGroup> _groups = [];
+  final Set<String> _hidden = {};
+
+  /// Favorites in the user's order, per "profileId|type".
+  final Map<String, List<String>> _favOrder = {};
+  DateTime? lastUpdateCheck;
   String? activeProfileId;
   String? _pinHash;
   bool hideAdult = true;
@@ -261,6 +295,10 @@ class LibraryStore extends ChangeNotifier {
         _history[item.key] = item;
       }
       lockedCategories.addAll((j['lockedCategories'] as List? ?? []).cast<String>());
+      _groups.addAll((j['groups'] as List? ?? []).map((e) => ChannelGroup.fromJson((e as Map).cast())));
+      _hidden.addAll((j['hidden'] as List? ?? []).cast<String>());
+      ((j['favOrder'] as Map?) ?? {}).forEach((k, v) => _favOrder['$k'] = (v as List).cast<String>().toList());
+      lastUpdateCheck = DateTime.tryParse(j['lastUpdateCheck'] as String? ?? '');
       activeProfileId = j['activeProfileId'] as String?;
       _pinHash = j['pinHash'] as String?;
       hideAdult = j['hideAdult'] as bool? ?? true;
@@ -290,6 +328,10 @@ class LibraryStore extends ChangeNotifier {
           'favorites': _favorites.values.map((e) => e.toJson()).toList(),
           'history': _history.values.map((e) => e.toJson()).toList(),
           'lockedCategories': lockedCategories.toList(),
+          'groups': _groups.map((g) => g.toJson()).toList(),
+          'hidden': _hidden.toList(),
+          'favOrder': _favOrder,
+          'lastUpdateCheck': lastUpdateCheck?.toIso8601String(),
           'activeProfileId': activeProfileId,
           'pinHash': _pinHash,
           'hideAdult': hideAdult,
@@ -324,6 +366,9 @@ class LibraryStore extends ChangeNotifier {
     profiles.removeWhere((p) => p.id == id);
     _favorites.removeWhere((_, v) => v.profileId == id);
     _history.removeWhere((_, v) => v.profileId == id);
+    _groups.removeWhere((g) => g.profileId == id);
+    _hidden.removeWhere((k) => k.startsWith('$id|'));
+    _favOrder.removeWhere((k, _) => k.startsWith('$id|'));
     if (activeProfileId == id) activeProfileId = profiles.isEmpty ? null : profiles.first.id;
     return _save();
   }
@@ -335,15 +380,98 @@ class LibraryStore extends ChangeNotifier {
 
   // Favorites --------------------------------------------------------------
 
-  List<SavedItem> favorites(String profileId, [ContentType? type]) =>
-      _favorites.values.where((f) => f.profileId == profileId && (type == null || f.type == type)).toList()
-        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+  /// Favorites in the order the user arranged them; new ones go to the end.
+  List<SavedItem> favorites(String profileId, [ContentType? type]) {
+    final list = _favorites.values.where((f) => f.profileId == profileId && (type == null || f.type == type)).toList();
+    int rank(SavedItem f) {
+      final i = _favOrder['$profileId|${f.type.name}']?.indexOf(f.id) ?? -1;
+      return i < 0 ? 1 << 30 : i;
+    }
+
+    list.sort((a, b) {
+      final r = rank(a).compareTo(rank(b));
+      return r != 0 ? r : a.updatedAt.compareTo(b.updatedAt);
+    });
+    return list;
+  }
+
+  /// Moves a favorite one place up (-1) or down (+1).
+  Future<void> moveFavorite(String profileId, ContentType type, String id, int delta) {
+    final ids = favorites(profileId, type).map((f) => f.id).toList();
+    _move(ids, id, delta);
+    _favOrder['$profileId|${type.name}'] = ids;
+    return _save();
+  }
+
+  static void _move(List<String> ids, String id, int delta) {
+    final i = ids.indexOf(id);
+    final j = i + delta;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    ids
+      ..removeAt(i)
+      ..insert(j, id);
+  }
 
   bool isFavorite(String profileId, ContentType type, String id) =>
       _favorites.containsKey('$profileId|${type.name}|$id');
 
   Future<void> toggleFavorite(SavedItem item) {
     _favorites.remove(item.key) ?? (_favorites[item.key] = item);
+    return _save();
+  }
+
+  // Channel groups and hidden channels -------------------------------------
+
+  List<ChannelGroup> groups(String profileId) => _groups.where((g) => g.profileId == profileId).toList();
+
+  ChannelGroup? group(String id) {
+    for (final g in _groups) {
+      if (g.id == id) return g;
+    }
+    return null;
+  }
+
+  Future<ChannelGroup> createGroup(String profileId, String name) async {
+    final g = ChannelGroup(id: 'g${DateTime.now().microsecondsSinceEpoch}', profileId: profileId, name: name.trim());
+    _groups.add(g);
+    await _save();
+    return g;
+  }
+
+  Future<void> renameGroup(ChannelGroup g, String name) {
+    g.name = name.trim();
+    return _save();
+  }
+
+  Future<void> deleteGroup(ChannelGroup g) {
+    _groups.remove(g);
+    return _save();
+  }
+
+  Future<void> toggleInGroup(ChannelGroup g, String channelId) {
+    if (!g.channelIds.remove(channelId)) g.channelIds.add(channelId);
+    return _save();
+  }
+
+  Future<void> moveInGroup(ChannelGroup g, String channelId, int delta) {
+    _move(g.channelIds, channelId, delta);
+    return _save();
+  }
+
+  bool isHidden(String profileId, String channelId) => _hidden.contains('$profileId|$channelId');
+
+  Set<String> hiddenIds(String profileId) => {
+    for (final k in _hidden)
+      if (k.startsWith('$profileId|')) k.substring(profileId.length + 1),
+  };
+
+  Future<void> setHidden(String profileId, String channelId, bool hidden) {
+    hidden ? _hidden.add('$profileId|$channelId') : _hidden.remove('$profileId|$channelId');
+    return _save();
+  }
+
+  Future<void> markUpdateCheck() {
+    lastUpdateCheck = DateTime.now();
     return _save();
   }
 
@@ -354,6 +482,9 @@ class LibraryStore extends ChangeNotifier {
         ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
   SavedItem? historyItem(String profileId, ContentType type, String id) => _history['$profileId|${type.name}|$id'];
+
+  /// The live channel watched most recently on this playlist.
+  SavedItem? lastChannel(String profileId) => history(profileId, ContentType.live).firstOrNull;
 
   Future<void> recordPlayback(SavedItem item) {
     _history[item.key] = item;

@@ -20,6 +20,10 @@ class LiveScreen extends StatefulWidget {
 
 class _LiveScreenState extends State<LiveScreen> {
   static const _favoritesId = '__favorites__';
+  static const _groupPrefix = 'grp:';
+
+  /// The last channel opens by itself once per app launch, not every time Live TV is shown.
+  static bool _autoStarted = false;
 
   List<Category>? _categories;
   String _categoryId = Category.allId;
@@ -51,6 +55,7 @@ class _LiveScreenState extends State<LiveScreen> {
       if (!mounted) return;
       setState(() => _categories = cats);
       await _openCategory(Category.allId);
+      await _resumeLastChannel();
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -60,10 +65,9 @@ class _LiveScreenState extends State<LiveScreen> {
     final session = context.read<Session>();
     final store = context.read<LibraryStore>();
     final profileId = session.profile!.id;
-    if (id != Category.allId && id != _favoritesId) {
-      final cat = _categories!.firstWhere((c) => c.id == id);
-      if (!await Parental.unlock(context, profileId, cat)) return;
-    }
+    final cat = _categories!.where((c) => c.id == id).firstOrNull;
+    if (cat != null && !await Parental.unlock(context, profileId, cat)) return;
+    if (!mounted) return;
     setState(() {
       _categoryId = id;
       _channels = null;
@@ -72,8 +76,17 @@ class _LiveScreenState extends State<LiveScreen> {
       List<Channel> list;
       if (id == _favoritesId) {
         list = store.favorites(profileId, ContentType.live).map((f) => f.toChannel()).toList();
+      } else if (id.startsWith(_groupPrefix)) {
+        final g = store.group(id.substring(_groupPrefix.length));
+        final byId = {for (final c in await session.source!.channels(Category.allId)) c.id: c};
+        list = [
+          for (final cid in g?.channelIds ?? const <String>[])
+            if (byId[cid] != null) byId[cid]!,
+        ];
       } else {
         list = await session.source!.channels(id);
+        final hiddenChannels = store.hiddenIds(profileId);
+        if (hiddenChannels.isNotEmpty) list = list.where((c) => !hiddenChannels.contains(c.id)).toList();
         if (id == Category.allId) {
           // Hide channels from locked / hidden categories in the "All" list.
           final hidden = {
@@ -132,18 +145,141 @@ class _LiveScreenState extends State<LiveScreen> {
     p?.dispose();
   }
 
-  void _toggleFavorite(Channel c) {
+  /// Opens the channel watched last, full screen, when the app starts (Settings can turn it off).
+  Future<void> _resumeLastChannel() async {
+    if (_autoStarted) return;
+    _autoStarted = true;
     final store = context.read<LibraryStore>();
     final profileId = context.read<Session>().profile!.id;
-    store.toggleFavorite(SavedItem.channel(profileId, c));
+    if (!store.player.startOnLastChannel) return;
+    final last = store.lastChannel(profileId);
+    if (last == null) return;
+    final list = _visibleChannels;
+    final c = list.where((c) => c.id == last.id).firstOrNull;
+    if (c == null || !mounted) return; // hidden, locked or gone from the playlist
+    _play(c);
+    _openFullscreen();
+  }
+
+  void _snack(String text) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text), duration: const Duration(seconds: 1)));
+
+  /// Long-press OK / right-click: favorites, groups, order and hiding.
+  Future<void> _channelMenu(Channel c) async {
+    final store = context.read<LibraryStore>();
+    final profileId = context.read<Session>().profile!.id;
     final fav = store.isFavorite(profileId, ContentType.live, c.id);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(fav ? 'Added to favorites' : 'Removed from favorites'),
-        duration: const Duration(seconds: 1),
+    final group = _categoryId.startsWith(_groupPrefix) ? store.group(_categoryId.substring(_groupPrefix.length)) : null;
+    final reorderable = _categoryId == _favoritesId || group != null;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Brand.slateObsidian,
+      isScrollControlled: true,
+      builder: (ctx) {
+        Widget item(String value, IconData icon, String label, {bool autofocus = false}) => ListTile(
+          autofocus: autofocus,
+          leading: Icon(icon, color: Brand.cyberMint),
+          title: Text(label),
+          onTap: () => Navigator.pop(ctx, value),
+        );
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * 0.8),
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Text(c.name, style: Theme.of(ctx).textTheme.titleMedium),
+                ),
+                item(
+                  'fav',
+                  fav ? Icons.star_outline_rounded : Icons.star_rounded,
+                  fav ? 'Remove from favorites' : 'Add to favorites',
+                  autofocus: true,
+                ),
+                item('group', Icons.playlist_add_rounded, 'Add to a group…'),
+                if (group != null) item('ungroup', Icons.playlist_remove_rounded, 'Remove from "${group.name}"'),
+                if (reorderable) ...[
+                  item('up', Icons.arrow_upward_rounded, 'Move up'),
+                  item('down', Icons.arrow_downward_rounded, 'Move down'),
+                ],
+                item('hide', Icons.visibility_off_rounded, 'Hide this channel'),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'fav':
+        await store.toggleFavorite(SavedItem.channel(profileId, c));
+        _snack(fav ? 'Removed from favorites' : 'Added to favorites');
+      case 'group':
+        await _addToGroup(c);
+      case 'ungroup':
+        await store.toggleInGroup(group!, c.id);
+        _snack('Removed from "${group.name}"');
+      case 'up' || 'down':
+        final delta = action == 'up' ? -1 : 1;
+        group != null
+            ? await store.moveInGroup(group, c.id, delta)
+            : await store.moveFavorite(profileId, ContentType.live, c.id, delta);
+      case 'hide':
+        await store.setHidden(profileId, c.id, true);
+        _snack('Hidden. Show it again in Settings > Hidden channels.');
+    }
+    if (mounted) await _openCategory(_categoryId);
+  }
+
+  Future<void> _addToGroup(Channel c) async {
+    final store = context.read<LibraryStore>();
+    final profileId = context.read<Session>().profile!.id;
+    final groups = store.groups(profileId);
+    final picked = await showModalBottomSheet<Object>(
+      context: context,
+      backgroundColor: Brand.slateObsidian,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text('Add to group', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            ),
+            for (final (i, g) in groups.indexed)
+              ListTile(
+                autofocus: i == 0,
+                leading: Icon(
+                  g.channelIds.contains(c.id) ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                  color: Brand.cyberMint,
+                ),
+                title: Text(g.name),
+                trailing: Text('${g.channelIds.length}', style: const TextStyle(color: Brand.textMuted)),
+                onTap: () => Navigator.pop(ctx, g),
+              ),
+            ListTile(
+              autofocus: groups.isEmpty,
+              leading: const Icon(Icons.add_rounded, color: Brand.cyberMint),
+              title: const Text('New group…'),
+              onTap: () => Navigator.pop(ctx, 'new'),
+            ),
+          ],
+        ),
       ),
     );
-    if (_categoryId == _favoritesId) _openCategory(_favoritesId);
+    if (!mounted || picked == null) return;
+    var g = picked is ChannelGroup ? picked : null;
+    if (picked == 'new') {
+      final name = await askText(context, title: 'New group', hint: 'e.g. Sports, News, Kids');
+      if (name == null || name.trim().isEmpty || !mounted) return;
+      g = await store.createGroup(profileId, name);
+    }
+    if (g == null) return;
+    final had = g.channelIds.contains(c.id);
+    await store.toggleInGroup(g, c.id);
+    _snack(had ? 'Removed from "${g.name}"' : 'Added to "${g.name}"');
   }
 
   @override
@@ -162,6 +298,7 @@ class _LiveScreenState extends State<LiveScreen> {
     final entries = <(String, String, bool, int?)>[
       (Category.allId, 'All channels', false, counts?[Category.allId]),
       (_favoritesId, 'Favorites', false, store.favorites(profileId, ContentType.live).length),
+      for (final g in store.groups(profileId)) ('$_groupPrefix${g.id}', g.name, false, g.channelIds.length),
       for (final c in visibleCats) (c.id, c.name, Parental.isLocked(store, profileId, c), counts?[c.id]),
     ];
 
@@ -177,7 +314,7 @@ class _LiveScreenState extends State<LiveScreen> {
         profileId: profileId,
         playingId: preview?.channel?.id,
         onPlay: _play,
-        onFavorite: _toggleFavorite,
+        onFavorite: _channelMenu,
         onFocus: (c) => setState(() => _focused = c),
       ),
     );
@@ -250,6 +387,11 @@ class _LiveScreenState extends State<LiveScreen> {
                             const Padding(
                               padding: EdgeInsets.only(right: 8),
                               child: Icon(Icons.star_rounded, size: 18, color: Brand.warning),
+                            )
+                          else if (id.startsWith(_groupPrefix))
+                            const Padding(
+                              padding: EdgeInsets.only(right: 8),
+                              child: Icon(Icons.folder_special_rounded, size: 18, color: Brand.sky),
                             ),
                           Expanded(
                             child: Text(

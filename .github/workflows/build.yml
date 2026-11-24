@@ -82,8 +82,8 @@ jobs:
           BUILD_NAME: ${{ needs.test.outputs.build_name }}
           BUILD_NUMBER: ${{ needs.test.outputs.build_number }}
         run: |
-          flutter build apk --release --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
-          flutter build apk --release --split-per-abi --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
+          flutter build apk --release --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER" --dart-define=APP_VERSION="$BUILD_NAME" --dart-define=APP_BUILD="$BUILD_NUMBER"
+          flutter build apk --release --split-per-abi --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER" --dart-define=APP_VERSION="$BUILD_NAME" --dart-define=APP_BUILD="$BUILD_NUMBER"
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk dist/iPTV-universal.apk
           for abi in arm64-v8a armeabi-v7a x86_64; do
@@ -108,7 +108,7 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
-      - run: flutter build windows --release --build-name="${{ needs.test.outputs.build_name }}" --build-number="${{ needs.test.outputs.build_number }}"
+      - run: flutter build windows --release --build-name="${{ needs.test.outputs.build_name }}" --build-number="${{ needs.test.outputs.build_number }}" --dart-define=APP_VERSION="${{ needs.test.outputs.build_name }}" --dart-define=APP_BUILD="${{ needs.test.outputs.build_number }}"
       - name: Package
         shell: pwsh
         run: |

@@ -9,6 +9,7 @@ abstract final class AppPlatform {
 
   static bool isTv = false;
   static bool pipSupported = false;
+  static bool voiceSupported = false;
   static final pipActive = ValueNotifier<bool>(false);
 
   static bool get isAndroid => !kIsWeb && Platform.isAndroid;
@@ -22,6 +23,7 @@ abstract final class AppPlatform {
     try {
       isTv = await _channel.invokeMethod<bool>('isTv') ?? false;
       pipSupported = await _channel.invokeMethod<bool>('pipSupported') ?? false;
+      voiceSupported = await _channel.invokeMethod<bool>('voiceSupported') ?? false;
     } catch (_) {}
   }
 
@@ -40,5 +42,34 @@ abstract final class AppPlatform {
     try {
       await _channel.invokeMethod('setAutoPip', {'enabled': enabled, 'width': width, 'height': height});
     } catch (_) {}
+  }
+
+  /// Speech-to-text through the system recogniser (the mic button on TV remotes).
+  static Future<String?> voiceSearch({String? prompt}) async {
+    if (!voiceSupported) return null;
+    try {
+      return await _channel.invokeMethod<String>('voiceSearch', {'prompt': prompt});
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// CPU types this device runs, best first (picks the right APK for updates).
+  static Future<List<String>> abis() async {
+    if (!isAndroid) return const [];
+    try {
+      return (await _channel.invokeListMethod<String>('abis')) ?? const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Opens the system installer for a downloaded APK.
+  static Future<bool> installApk(String path) async {
+    try {
+      return await _channel.invokeMethod<bool>('installApk', {'path': path}) ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 }

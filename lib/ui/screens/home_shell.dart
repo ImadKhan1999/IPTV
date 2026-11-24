@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
@@ -7,8 +8,11 @@ import '../../core/models.dart';
 import '../../core/sources/iptv_source.dart';
 import '../../data/library_store.dart';
 import '../../state/session.dart';
+import '../platform.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/update_dialog.dart';
+import '../../data/updater.dart';
 import 'favorites_screen.dart';
 import 'live_screen.dart';
 import 'search_screen.dart';
@@ -47,13 +51,39 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   Section _section = Section.live;
+  bool _voiceSearch = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Look for a new version a few seconds after start, at most once a day (release builds only).
+    if (AppVersion.name.endsWith('-dev')) return;
+    Future<void>.delayed(const Duration(seconds: 5), () {
+      if (mounted) checkForUpdates(context, quiet: true);
+    });
+  }
+
+  /// The remote's search key (or Ctrl+F) jumps to Search, listening right away on TV.
+  KeyEventResult _onKey(FocusNode _, KeyEvent e) {
+    if (e is! KeyDownEvent) return KeyEventResult.ignored;
+    final k = e.logicalKey;
+    final ctrlF = k == LogicalKeyboardKey.keyF && HardwareKeyboard.instance.isControlPressed;
+    if (k == LogicalKeyboardKey.browserSearch || k == LogicalKeyboardKey.find || ctrlF) {
+      setState(() {
+        _voiceSearch = !ctrlF && AppPlatform.voiceSupported;
+        _section = Section.search;
+      });
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
   Widget _page(Section s) => switch (s) {
     Section.live => const SessionGate(child: LiveScreen()),
     Section.movies => const SessionGate(child: VodScreen(type: ContentType.movie)),
     Section.series => const SessionGate(child: VodScreen(type: ContentType.series)),
     Section.favorites => const SessionGate(child: FavoritesScreen()),
-    Section.search => const SessionGate(child: SearchScreen()),
+    Section.search => SessionGate(child: SearchScreen(startWithVoice: _voiceSearch)),
     Section.settings => const SettingsScreen(),
   };
 
@@ -70,20 +100,26 @@ class _HomeShellState extends State<HomeShell> {
     if (!sections.contains(_section)) _section = Section.live;
 
     final page = KeyedSubtree(key: ValueKey(_section), child: _page(_section));
+    if (_section != Section.search) _voiceSearch = false;
 
     if (!wide) {
-      return Scaffold(
-        body: SafeArea(bottom: false, child: page),
-        bottomNavigationBar: NavigationBar(
-          backgroundColor: Brand.slateObsidian,
-          indicatorColor: Brand.cyberMint.withValues(alpha: 0.18),
-          selectedIndex: sections.indexOf(_section),
-          onDestinationSelected: (i) => setState(() => _section = sections[i]),
-          destinations: [for (final s in sections) NavigationDestination(icon: Icon(s.icon), label: s.label)],
-        ),
-      );
+      return Focus(onKeyEvent: _onKey, child: _phone(page, sections));
     }
+    return Focus(onKeyEvent: _onKey, child: _wide(page, sections));
+  }
 
+  Widget _phone(Widget page, List<Section> sections) => Scaffold(
+    body: SafeArea(bottom: false, child: page),
+    bottomNavigationBar: NavigationBar(
+      backgroundColor: Brand.slateObsidian,
+      indicatorColor: Brand.cyberMint.withValues(alpha: 0.18),
+      selectedIndex: sections.indexOf(_section),
+      onDestinationSelected: (i) => setState(() => _section = sections[i]),
+      destinations: [for (final s in sections) NavigationDestination(icon: Icon(s.icon), label: s.label)],
+    ),
+  );
+
+  Widget _wide(Widget page, List<Section> sections) {
     return Scaffold(
       body: Row(
         children: [

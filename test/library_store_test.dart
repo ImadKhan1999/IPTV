@@ -51,4 +51,36 @@ void main() {
     expect(store.favorites('a'), isEmpty);
     expect(store.profiles, isEmpty);
   });
+
+  test('favorites keep the order the user sets', () async {
+    final store = LibraryStore.memory();
+    for (final n in ['A', 'B', 'C']) {
+      await store.toggleFavorite(SavedItem.channel('p', Channel(id: n, name: n)));
+    }
+    await store.moveFavorite('p', ContentType.live, 'C', -1);
+    expect(store.favorites('p', ContentType.live).map((f) => f.id), ['A', 'C', 'B']);
+  });
+
+  test('channel groups, hidden channels and the last channel', () async {
+    final store = LibraryStore.memory();
+    final g = await store.createGroup('p', ' Sports ');
+    expect(g.name, 'Sports');
+    await store.toggleInGroup(g, '1');
+    await store.toggleInGroup(g, '2');
+    await store.moveInGroup(g, '2', -1);
+    expect(store.groups('p').single.channelIds, ['2', '1']);
+    await store.toggleInGroup(g, '2');
+    expect(g.channelIds, ['1']);
+
+    await store.setHidden('p', '9', true);
+    expect(store.isHidden('p', '9'), isTrue);
+    expect(store.hiddenIds('p'), {'9'});
+
+    await store.recordPlayback(SavedItem.channel('p', Channel(id: 'x', name: 'X')));
+    expect(store.lastChannel('p')!.id, 'x');
+
+    await store.removeProfile('p');
+    expect(store.groups('p'), isEmpty);
+    expect(store.hiddenIds('p'), isEmpty);
+  });
 }

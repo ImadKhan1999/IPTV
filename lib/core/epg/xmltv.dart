@@ -29,6 +29,25 @@ class EpgGuide {
     return list ?? const [];
   }
 
+  /// Programmes on air now or starting within [within] whose title [matches], soonest first.
+  List<EpgProgram> search(
+    bool Function(String title) matches, {
+    DateTime? now,
+    Duration within = const Duration(hours: 24),
+    int limit = 60,
+  }) {
+    final t = now ?? DateTime.now();
+    final until = t.add(within);
+    final out = <EpgProgram>[];
+    for (final list in _byChannel.values) {
+      for (final p in list) {
+        if (p.end.isAfter(t) && p.start.isBefore(until) && matches(p.title)) out.add(p);
+      }
+    }
+    out.sort((a, b) => a.start.compareTo(b.start));
+    return out.take(limit).toList();
+  }
+
   /// Programmes from the one on air now onwards.
   List<EpgProgram> upcoming(String? epgId, {String? channelName, int limit = 6, DateTime? now}) {
     final t = now ?? DateTime.now();
