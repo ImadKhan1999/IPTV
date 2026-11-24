@@ -19,8 +19,24 @@ jobs:
     name: Analyze and test
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      build_name: ${{ steps.version.outputs.build_name }}
+      build_number: ${{ steps.version.outputs.build_number }}
     steps:
       - uses: actions/checkout@v4
+      # Version name comes from the tag (v1.2.0 -> 1.2.0) or pubspec.yaml; the build number
+      # always goes up, so every new APK installs over the previous one.
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            name="${GITHUB_REF#refs/tags/v}"
+          else
+            name="$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml)"
+          fi
+          echo "build_name=$name" >> "$GITHUB_OUTPUT"
+          echo "build_number=$((GITHUB_RUN_NUMBER + 100))" >> "$GITHUB_OUTPUT"
+          echo "Version $name ($((GITHUB_RUN_NUMBER + 100)))"
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -48,6 +64,11 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+      - name: Require the signing key for releases
+        if: startsWith(github.ref, 'refs/tags/v') && env.HAS_SIGNING_KEY != 'true'
+        run: |
+          echo "::error::Release builds need the IPTV_KEYSTORE_* secrets so updates install over older versions."
+          exit 1
       - name: Decode signing key
         if: env.HAS_SIGNING_KEY == 'true'
         env:
@@ -58,9 +79,11 @@ jobs:
           IPTV_KEYSTORE_PASSWORD: ${{ secrets.IPTV_KEYSTORE_PASSWORD }}
           IPTV_KEY_ALIAS: ${{ secrets.IPTV_KEY_ALIAS }}
           IPTV_KEY_PASSWORD: ${{ secrets.IPTV_KEY_PASSWORD }}
+          BUILD_NAME: ${{ needs.test.outputs.build_name }}
+          BUILD_NUMBER: ${{ needs.test.outputs.build_number }}
         run: |
-          flutter build apk --release
-          flutter build apk --release --split-per-abi
+          flutter build apk --release --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
+          flutter build apk --release --split-per-abi --build-name="$BUILD_NAME" --build-number="$BUILD_NUMBER"
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk dist/iPTV-universal.apk
           for abi in arm64-v8a armeabi-v7a x86_64; do
@@ -85,7 +108,7 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
-      - run: flutter build windows --release
+      - run: flutter build windows --release --build-name="${{ needs.test.outputs.build_name }}" --build-number="${{ needs.test.outputs.build_number }}"
       - name: Package
         shell: pwsh
         run: |
@@ -95,7 +118,7 @@ jobs:
         shell: pwsh
         run: |
           choco install innosetup --no-progress -y
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$((Select-String -Path pubspec.yaml -Pattern '^version: (\S+)').Matches[0].Groups[1].Value.Split('+')[0]) windows/installer.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=${{ needs.test.outputs.build_name }} windows/installer.iss
       - uses: actions/upload-artifact@v4
         with:
           name: iPTV-windows
