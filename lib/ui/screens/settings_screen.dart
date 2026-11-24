@@ -197,6 +197,23 @@ class SettingsScreen extends StatelessWidget {
           value: store.player.hardwareDecoding,
           onChanged: (v) => store.updatePlayer(store.player.copyWith(hardwareDecoding: v)),
         ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Live TV style'),
+          subtitle: const Text(
+            'Full screen keeps the picture playing with a see-through channel list on the left (OK or ◀ opens it). '
+            'Classic shows categories, channels and a preview side by side. Auto uses full screen on TV.',
+          ),
+          trailing: DropdownButton<String>(
+            value: store.player.liveStyle,
+            items: const [
+              DropdownMenuItem(value: 'auto', child: Text('Auto')),
+              DropdownMenuItem(value: 'fullscreen', child: Text('Full screen')),
+              DropdownMenuItem(value: 'classic', child: Text('Classic')),
+            ],
+            onChanged: (v) => store.updatePlayer(store.player.copyWith(liveStyle: v)),
+          ),
+        ),
         if (AppPlatform.isAndroid)
           ListTile(
             contentPadding: EdgeInsets.zero,

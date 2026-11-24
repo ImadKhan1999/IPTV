@@ -7,6 +7,8 @@ import 'package:iptv/main.dart';
 import 'package:iptv/ui/widgets/pair_card.dart';
 import 'package:iptv/state/session.dart';
 import 'package:iptv/ui/screens/home_shell.dart';
+import 'package:iptv/ui/player/live_overlay.dart';
+import 'package:iptv/ui/player/player_screen.dart';
 import 'package:iptv/ui/theme.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
@@ -124,6 +126,46 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('set-top box channel list: OK switches channel, left/right move between panes', (tester) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = LibraryStore.memory();
+    final profile = PlaylistProfile(id: 'p', name: 'Test', kind: SourceKind.m3u, url: 'x');
+    await store.upsertProfile(profile);
+    final session = Session(store)
+      ..source = (M3uSource(profile)..loadFromText(_m3u))
+      ..state = SessionState.ready;
+    final all = await session.source!.channels(Category.allId);
+    final target = _FakeLive(PlayRequest.live(all, 0));
+    var closed = 0;
+    await tester.pumpWidget(
+      _app(store, session, Scaffold(body: LiveOverlay(controller: target, onClose: () => closed++))),
+    );
+    await tester.pumpAndSettle();
+    // Playing channel is focused; down + OK switches to the next one and keeps the list open.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(target.channel!.name, 'Sports One');
+    expect(closed, 0);
+    // OK on the playing channel goes back to the picture.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(closed, 1);
+    // Left to categories, pick "Sports": its channel list loads and gets focus.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 3; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    }
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Sports One'), findsWidgets);
+    expect(find.text('News One'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('categories can be pinned to the top', (tester) async {
     final store = LibraryStore.memory();
     final cats = [
@@ -154,4 +196,22 @@ void main() {
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.text('News One'), findsOneWidget);
   });
+}
+
+class _FakeLive implements LiveTarget {
+  _FakeLive(this.request) : index = request.index;
+
+  @override
+  PlayRequest request;
+  @override
+  int index;
+
+  @override
+  Channel? get channel => request.channels[index];
+
+  @override
+  void replace(PlayRequest r) {
+    request = r;
+    index = r.index;
+  }
 }

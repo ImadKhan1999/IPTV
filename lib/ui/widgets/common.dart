@@ -506,10 +506,13 @@ bool moveFocus(TraversalDirection direction) {
 /// focused there last. Back returns to the first pane (categories); from there it goes on
 /// to the home screen as usual.
 class PaneKeys extends StatelessWidget {
-  const PaneKeys({super.key, required this.panes, required this.child});
+  const PaneKeys({super.key, required this.panes, required this.child, this.backToFirst = true});
 
   final List<FocusScopeNode> panes;
   final Widget child;
+
+  /// Back from a later pane returns to the first one (off where Back should close instead).
+  final bool backToFirst;
 
   static bool _inTextField(FocusNode? n) => n?.context?.findAncestorWidgetOfExactType<TvTextKeys>() != null;
 
@@ -551,7 +554,10 @@ class PaneKeys extends StatelessWidget {
       moveFocus(k == LogicalKeyboardKey.arrowUp ? TraversalDirection.up : TraversalDirection.down);
       return KeyEventResult.handled;
     }
-    if (e is KeyDownEvent && (k == LogicalKeyboardKey.goBack || k == LogicalKeyboardKey.escape) && i > 0) {
+    if (backToFirst &&
+        e is KeyDownEvent &&
+        (k == LogicalKeyboardKey.goBack || k == LogicalKeyboardKey.escape) &&
+        i > 0) {
       focusPane(panes.first);
       return KeyEventResult.handled;
     }

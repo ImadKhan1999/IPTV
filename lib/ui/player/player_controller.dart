@@ -62,7 +62,15 @@ class StreamInfo {
 ///
 /// The live preview pane and the full screen player share one controller, so going full
 /// screen never restarts the stream.
-class PlayerController extends ChangeNotifier {
+/// What the live channel list needs from the player (kept small so it can be tested).
+abstract interface class LiveTarget {
+  PlayRequest get request;
+  int get index;
+  Channel? get channel;
+  void replace(PlayRequest request);
+}
+
+class PlayerController extends ChangeNotifier implements LiveTarget {
   PlayerController({required this.session, required this.store, required PlayRequest request})
     : _request = request,
       _index = request.index {
@@ -171,10 +179,13 @@ class PlayerController extends ChangeNotifier {
     });
   }
 
+  @override
   PlayRequest get request => _request;
+  @override
   int get index => _index;
   PlayStage get stage => _stage;
   bool get isLive => _request.type == ContentType.live && _request.catchup == null;
+  @override
   Channel? get channel => isLive && _request.channels.isNotEmpty ? _request.channels[_index] : null;
   bool get hasNextEpisode => _request.type == ContentType.series && _index < _request.episodes.length - 1;
 
@@ -259,6 +270,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// Replaces what is playing (used by the live preview when another channel is picked).
+  @override
   void replace(PlayRequest request) {
     saveProgress();
     _request = request;

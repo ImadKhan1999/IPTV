@@ -175,6 +175,7 @@ class PlayerSettings {
     this.refreshHours = 24,
     this.startOnLastChannel = true,
     this.videoOutput = 'auto',
+    this.liveStyle = 'auto',
   });
 
   final bool hardwareDecoding;
@@ -194,6 +195,10 @@ class PlayerSettings {
   /// fastest, smooth 4K, no picture brightness / styled subtitles) or 'compat' (GPU renderer).
   final String videoOutput;
 
+  /// Live TV layout: 'auto' (full screen on TV), 'fullscreen' (video with a see-through
+  /// channel list, like a set-top box) or 'classic' (categories | channels | preview).
+  final String liveStyle;
+
   PlayerSettings copyWith({
     bool? hardwareDecoding,
     int? bufferSeconds,
@@ -203,6 +208,7 @@ class PlayerSettings {
     int? refreshHours,
     bool? startOnLastChannel,
     String? videoOutput,
+    String? liveStyle,
   }) => PlayerSettings(
     hardwareDecoding: hardwareDecoding ?? this.hardwareDecoding,
     bufferSeconds: bufferSeconds ?? this.bufferSeconds,
@@ -212,6 +218,7 @@ class PlayerSettings {
     refreshHours: refreshHours ?? this.refreshHours,
     startOnLastChannel: startOnLastChannel ?? this.startOnLastChannel,
     videoOutput: videoOutput ?? this.videoOutput,
+    liveStyle: liveStyle ?? this.liveStyle,
   );
 
   Map<String, dynamic> toJson() => {
@@ -223,6 +230,7 @@ class PlayerSettings {
     'refreshHours': refreshHours,
     'startOnLastChannel': startOnLastChannel,
     'videoOutput': videoOutput,
+    'liveStyle': liveStyle,
   };
 
   factory PlayerSettings.fromJson(Map<String, dynamic> j) => PlayerSettings(
@@ -234,6 +242,7 @@ class PlayerSettings {
     refreshHours: j['refreshHours'] as int? ?? 24,
     startOnLastChannel: j['startOnLastChannel'] as bool? ?? true,
     videoOutput: j['videoOutput'] as String? ?? 'auto',
+    liveStyle: j['liveStyle'] as String? ?? 'auto',
   );
 }
 

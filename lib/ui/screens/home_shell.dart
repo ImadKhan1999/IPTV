@@ -16,6 +16,7 @@ import 'live_screen.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
 import 'tv_home.dart';
+import '../player/live_overlay.dart';
 import 'vod_screen.dart';
 
 enum Section { live, movies, series, favorites, search, settings }
@@ -61,16 +62,64 @@ class _HomeShellState extends State<HomeShell> {
   bool _startOnHome() {
     // Opening straight into the last channel skips the home screen, like before.
     final store = context.read<LibraryStore>();
+    if (liveFullscreenMode(store.player)) return true; // the player opens over Home instead
     final profileId = store.activeProfile?.id;
     final resume = store.player.startOnLastChannel && profileId != null && store.lastChannel(profileId) != null;
     return !resume;
   }
 
-  void _open(Section s) => setState(() {
-    _section = s;
-    _home = false;
-    _lastOpened = s;
-  });
+  @override
+  void initState() {
+    super.initState();
+    // Set-top box mode: start on the last channel, full screen, once the playlist is ready.
+    final store = context.read<LibraryStore>();
+    final profileId = store.activeProfile?.id;
+    if (liveFullscreenMode(store.player) &&
+        store.player.startOnLastChannel &&
+        profileId != null &&
+        store.lastChannel(profileId) != null &&
+        !_autoStarted) {
+      _autoStarted = true;
+      _whenReady(() => openLiveFullscreen(context));
+    }
+  }
+
+  static bool _autoStarted = false;
+
+  void _whenReady(VoidCallback run) {
+    final session = context.read<Session>();
+    if (session.state == SessionState.ready) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) run();
+      });
+      return;
+    }
+    void listener() {
+      if (session.state == SessionState.ready) {
+        session.removeListener(listener);
+        if (mounted) run();
+      } else if (session.state == SessionState.error) {
+        session.removeListener(listener);
+      }
+    }
+
+    session.addListener(listener);
+  }
+
+  void _open(Section s) {
+    final store = context.read<LibraryStore>();
+    if (s == Section.live && _wideLayout && liveFullscreenMode(store.player)) {
+      // Set-top box style: Live TV is the picture itself, with the channel list over it.
+      setState(() => _lastOpened = s);
+      _whenReady(() => openLiveFullscreen(context, showList: true));
+      return;
+    }
+    setState(() {
+      _section = s;
+      _home = false;
+      _lastOpened = s;
+    });
+  }
 
   void _goHome() => setState(() => _home = true);
 
