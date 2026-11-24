@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a release with this version (e.g. 1.0.0). Leave empty for a test build."
+        required: false
+        default: ""
 
 concurrency:
   group: build-${{ github.ref }}
@@ -28,9 +33,13 @@ jobs:
       # always goes up, so every new APK installs over the previous one.
       - name: Version
         id: version
+        env:
+          RELEASE_INPUT: ${{ github.event.inputs.release }}
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             name="${GITHUB_REF#refs/tags/v}"
+          elif [[ -n "$RELEASE_INPUT" ]]; then
+            name="${RELEASE_INPUT#v}"
           else
             name="$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml)"
           fi
@@ -65,7 +74,7 @@ jobs:
           channel: stable
           cache: true
       - name: Require the signing key for releases
-        if: startsWith(github.ref, 'refs/tags/v') && env.HAS_SIGNING_KEY != 'true'
+        if: (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release != '') && env.HAS_SIGNING_KEY != 'true'
         run: |
           echo "::error::Release builds need the IPTV_KEYSTORE_* secrets so updates install over older versions."
           exit 1
@@ -127,8 +136,8 @@ jobs:
 
   release:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [android, windows]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release != ''
+    needs: [test, android, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -139,5 +148,8 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.test.outputs.build_name }}
+          target_commitish: ${{ github.sha }}
+          name: iPTV ${{ needs.test.outputs.build_name }}
           files: dist/*
           generate_release_notes: true
