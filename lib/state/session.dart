@@ -73,8 +73,16 @@ class Session extends ChangeNotifier {
         _keepAlive = Timer.periodic(const Duration(minutes: 2), (_) => s.keepAlive());
       }
       notifyListeners();
-      unawaited(_loadGuide());
-      unawaited(_loadCounts(s));
+      // Background work starts a moment later, so the first screen (and the channel that
+      // starts playing) gets the device to itself while it appears. Heavy parsing in both
+      // runs on background threads.
+      unawaited(
+        Future<void>.delayed(backgroundDelay, () async {
+          if (source != s) return;
+          await _loadCounts(s);
+          if (source == s) await _loadGuide();
+        }),
+      );
       return true;
     } catch (e) {
       s.dispose();
@@ -123,6 +131,9 @@ class Session extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Pause before counting and guide download start after connecting (zero in tests).
+  static Duration backgroundDelay = const Duration(milliseconds: 1200);
 
   Future<void> _loadCounts(IptvSource s) async {
     for (final type in ContentType.values) {

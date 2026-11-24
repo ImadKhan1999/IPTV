@@ -10,6 +10,7 @@ import 'package:iptv/ui/screens/home_shell.dart';
 import 'package:iptv/ui/player/live_overlay.dart';
 import 'package:iptv/ui/player/player_screen.dart';
 import 'package:iptv/ui/theme.dart';
+import 'package:iptv/ui/widgets/common.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
@@ -45,6 +46,55 @@ void main() {
     await tester.tap(find.text('Stalker'));
     await tester.pump();
     expect(find.text('MAC address'), findsOneWidget);
+  });
+
+  testWidgets('remote works on Home even when nothing had focus (no mouse needed)', (tester) async {
+    tester.view.physicalSize = const Size(1920, 1080);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = LibraryStore.memory();
+    final profile = PlaylistProfile(id: 'p', name: 'Test', kind: SourceKind.m3u, url: 'x');
+    await store.upsertProfile(profile);
+    final session = Session(store)
+      ..source = (M3uSource(profile)..loadFromText(_m3u))
+      ..state = SessionState.ready;
+    final nav = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider.value(value: store),
+          ChangeNotifierProvider.value(value: session),
+        ],
+        child: MaterialApp(
+          navigatorKey: nav,
+          theme: buildTheme(),
+          builder: (_, child) => FocusRescue(child: child!),
+          home: const HomeShell(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Live TV'), findsOneWidget);
+
+    // A full-screen page (the player) opens over Home and closes again.
+    nav.currentState!.push(MaterialPageRoute<void>(builder: (_) => const Scaffold(body: Text('player'))));
+    await tester.pumpAndSettle();
+    nav.currentState!.pop();
+    await tester.pumpAndSettle();
+    expect(FocusRescue.focusLost, isFalse, reason: 'Home takes focus back when it is in front again');
+
+    // Even if focus is lost completely, the first remote press lands on a tile.
+    FocusManager.instance.primaryFocus!.unfocus();
+    await tester.pump();
+    expect(FocusRescue.focusLost, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(FocusRescue.focusLost, isFalse);
+    // And from there the remote drives Home as usual: OK opens a section.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('Live TV'), findsWidgets);
+    expect(find.text('News One'), findsWidgets);
   });
 
   testWidgets('TV layout: home tiles, then categories and channels with the D-pad', (tester) async {
@@ -140,7 +190,13 @@ void main() {
     final target = _FakeLive(PlayRequest.live(all, 0));
     var closed = 0;
     await tester.pumpWidget(
-      _app(store, session, Scaffold(body: LiveOverlay(controller: target, onClose: () => closed++))),
+      _app(
+        store,
+        session,
+        Scaffold(
+          body: LiveOverlay(controller: target, onClose: () => closed++),
+        ),
+      ),
     );
     await tester.pumpAndSettle();
     // Playing channel is focused; down + OK switches to the next one and keeps the list open.

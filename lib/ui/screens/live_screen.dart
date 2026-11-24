@@ -311,7 +311,7 @@ class _LiveScreenState extends State<LiveScreen> {
       return MessageView(icon: Icons.error_outline_rounded, title: 'Could not load channels', subtitle: _error);
     }
     final cats = _categories;
-    if (cats == null) return const LoadingView(message: 'Loading channels…');
+    if (cats == null) return const LoadingView();
 
     final store = context.watch<LibraryStore>();
     final session = context.watch<Session>();
