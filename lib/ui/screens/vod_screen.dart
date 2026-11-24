@@ -130,13 +130,15 @@ class _VodScreenState extends State<VodScreen> {
     );
 
     final grid = _PosterGrid(items: _visibleItems, loading: _items == null, type: widget.type);
-    final search = TextField(
-      controller: _filter,
-      onChanged: (_) => setState(() {}),
-      decoration: InputDecoration(
-        isDense: true,
-        prefixIcon: const Icon(Icons.search_rounded),
-        hintText: widget.type == ContentType.movie ? 'Filter movies' : 'Filter series',
+    final search = TvTextKeys(
+      child: TextField(
+        controller: _filter,
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(
+          isDense: true,
+          prefixIcon: const Icon(Icons.search_rounded),
+          hintText: widget.type == ContentType.movie ? 'Filter movies' : 'Filter series',
+        ),
       ),
     );
 

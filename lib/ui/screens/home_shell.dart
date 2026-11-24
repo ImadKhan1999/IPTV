@@ -11,8 +11,6 @@ import '../../state/session.dart';
 import '../platform.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
-import '../widgets/update_dialog.dart';
-import '../../data/updater.dart';
 import 'favorites_screen.dart';
 import 'live_screen.dart';
 import 'search_screen.dart';
@@ -52,16 +50,6 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   Section _section = Section.live;
   bool _voiceSearch = false;
-
-  @override
-  void initState() {
-    super.initState();
-    // Look for a new version a few seconds after start, at most once a day (release builds only).
-    if (AppVersion.name.endsWith('-dev')) return;
-    Future<void>.delayed(const Duration(seconds: 5), () {
-      if (mounted) checkForUpdates(context, quiet: true);
-    });
-  }
 
   /// The remote's search key (or Ctrl+F) jumps to Search, listening right away on TV.
   KeyEventResult _onKey(FocusNode _, KeyEvent e) {

@@ -9,6 +9,7 @@ import 'package:iptv/core/models.dart';
 import 'package:iptv/core/sources/m3u_source.dart';
 import 'package:iptv/data/library_store.dart';
 import 'package:iptv/main.dart';
+import 'package:iptv/ui/widgets/pair_card.dart';
 import 'package:iptv/state/session.dart';
 import 'package:iptv/ui/screens/home_shell.dart';
 import 'package:iptv/ui/theme.dart';
@@ -41,6 +42,7 @@ final _m3u = StringBuffer('#EXTM3U\n')
   ]);
 
 void main() {
+  PairCard.debugFakeUrl = 'http://192.168.1.20:8765/?k=demo2026';
   setUpAll(() async {
     final sdk =
         Platform.environment['FLUTTER_ROOT'] ??
@@ -90,7 +92,9 @@ void main() {
     child: MaterialApp(debugShowCheckedModeBanner: false, theme: buildTheme(), home: const HomeShell()),
   );
 
-  testWidgets('welcome', (t) => shoot(t, const Size(1920, 1080), IptvApp(store: LibraryStore.memory()), 'welcome'));
+  testWidgets('welcome on a 1080p TV (960x540 logical)', (t) => shoot(t, const Size(960, 540), IptvApp(store: LibraryStore.memory(), checkUpdates: false), 'welcome-tv'));
+
+  testWidgets('welcome', (t) => shoot(t, const Size(1920, 1080), IptvApp(store: LibraryStore.memory(), checkUpdates: false), 'welcome'));
 
   testWidgets('live tv', (t) async {
     final (store, session) = await connected();

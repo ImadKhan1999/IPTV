@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/parental.dart';
 import '../widgets/update_dialog.dart';
+import 'send_playlists_screen.dart';
 import 'welcome_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -87,13 +88,23 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
           ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: OutlinedButton.icon(
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddPlaylistScreen())),
-            icon: const Icon(Icons.add_rounded),
-            label: const Text('Add playlist'),
-          ),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddPlaylistScreen())),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Add playlist'),
+            ),
+            if (store.profiles.isNotEmpty)
+              OutlinedButton.icon(
+                onPressed: () =>
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SendPlaylistsScreen())),
+                icon: const Icon(Icons.cast_rounded),
+                label: const Text('Send playlists to another device'),
+              ),
+          ],
         ),
         if (account != null) ...[
           const SizedBox(height: 12),

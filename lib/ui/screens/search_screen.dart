@@ -155,14 +155,16 @@ class _SearchScreenState extends State<SearchScreen> {
           child: Row(
             children: [
               Expanded(
-                child: TextField(
-                  controller: _query,
-                  autofocus: !widget.startWithVoice,
-                  onChanged: _search,
-                  onSubmitted: (q) => _search(q, immediate: true),
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search_rounded),
-                    hintText: 'Search channels, movies, series and TV guide',
+                child: TvTextKeys(
+                  child: TextField(
+                    controller: _query,
+                    autofocus: !widget.startWithVoice,
+                    onChanged: _search,
+                    onSubmitted: (q) => _search(q, immediate: true),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search_rounded),
+                      hintText: 'Search channels, movies, series and TV guide',
+                    ),
                   ),
                 ),
               ),

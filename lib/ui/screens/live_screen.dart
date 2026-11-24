@@ -617,13 +617,15 @@ class _SearchField extends StatelessWidget {
   final VoidCallback onChanged;
 
   @override
-  Widget build(BuildContext context) => TextField(
-    controller: controller,
-    onChanged: (_) => onChanged(),
-    decoration: const InputDecoration(
-      isDense: true,
-      prefixIcon: Icon(Icons.search_rounded),
-      hintText: 'Filter channels',
+  Widget build(BuildContext context) => TvTextKeys(
+    child: TextField(
+      controller: controller,
+      onChanged: (_) => onChanged(),
+      decoration: const InputDecoration(
+        isDense: true,
+        prefixIcon: Icon(Icons.search_rounded),
+        hintText: 'Filter channels',
+      ),
     ),
   );
 }

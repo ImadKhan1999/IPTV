@@ -48,6 +48,7 @@ class MainActivity : FlutterActivity() {
                     "voiceSupported" -> result.success(voiceIntent().resolveActivity(packageManager) != null)
                     "voiceSearch" -> startVoiceSearch(call.argument<String>("prompt"), result)
                     "abis" -> result.success(Build.SUPPORTED_ABIS.toList())
+                    "deviceName" -> result.success(deviceName())
                     "installApk" -> result.success(installApk(call.argument<String>("path")!!))
                     else -> result.notImplemented()
                 }
@@ -140,5 +141,18 @@ class MainActivity : FlutterActivity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         channel?.invokeMethod("pipChanged", isInPictureInPictureMode)
+    }
+
+    /** The name the person gave this device (Settings > About > Device name), else the model. */
+    private fun deviceName(): String {
+        val named = try {
+            android.provider.Settings.Global.getString(contentResolver, "device_name")
+        } catch (e: Exception) {
+            null
+        }
+        if (!named.isNullOrBlank()) return named
+        val model = Build.MODEL ?: "Android device"
+        val maker = Build.MANUFACTURER ?: ""
+        return if (maker.isNotBlank() && !model.startsWith(maker, ignoreCase = true)) "$maker $model" else model
     }
 }
