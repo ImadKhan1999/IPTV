@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../platform.dart';
 import '../theme.dart';
 
 /// A focusable tile that works the same with a TV remote (D-pad + OK), a keyboard,
@@ -36,9 +37,27 @@ class TvFocusable extends StatefulWidget {
 
 class _TvFocusableState extends State<TvFocusable> {
   bool _focused = false;
+  bool _okDown = false;
+  bool _longFired = false;
   bool _hovered = false;
 
   KeyEventResult _onKey(FocusNode node, KeyEvent e) {
+    if (e is KeyUpEvent) {
+      final k = e.logicalKey;
+      final wasDown = _okDown;
+      _okDown = false;
+      if (wasDown &&
+          !_longFired &&
+          widget.onLongPress != null &&
+          (k == LogicalKeyboardKey.select ||
+              k == LogicalKeyboardKey.enter ||
+              k == LogicalKeyboardKey.numpadEnter ||
+              k == LogicalKeyboardKey.gameButtonA)) {
+        widget.onSelect?.call();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
     if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
     final k = e.logicalKey;
     // Long-press OK / menu key on remotes opens the context action (e.g. add to favorites).
@@ -46,15 +65,25 @@ class _TvFocusableState extends State<TvFocusable> {
       widget.onLongPress!();
       return KeyEventResult.handled;
     }
-    if (e is KeyDownEvent &&
-        (k == LogicalKeyboardKey.select ||
-            k == LogicalKeyboardKey.enter ||
-            k == LogicalKeyboardKey.numpadEnter ||
-            k == LogicalKeyboardKey.gameButtonA)) {
-      widget.onSelect?.call();
+    final isOk =
+        k == LogicalKeyboardKey.select ||
+        k == LogicalKeyboardKey.enter ||
+        k == LogicalKeyboardKey.numpadEnter ||
+        k == LogicalKeyboardKey.gameButtonA;
+    if (!isOk) return KeyEventResult.ignored;
+    if (widget.onLongPress == null) {
+      if (e is KeyDownEvent) widget.onSelect?.call();
       return KeyEventResult.handled;
     }
-    return KeyEventResult.ignored;
+    // With a long-press action: a short press of OK selects (on release), holding it opens the menu.
+    if (e is KeyDownEvent) {
+      _okDown = true;
+      _longFired = false;
+    } else if (e is KeyRepeatEvent && _okDown && !_longFired) {
+      _longFired = true;
+      widget.onLongPress!();
+    }
+    return KeyEventResult.handled;
   }
 
   @override
@@ -85,13 +114,14 @@ class _TvFocusableState extends State<TvFocusable> {
       autofocus: widget.autofocus,
       onKeyEvent: _onKey,
       onFocusChange: (f) {
+        if (!f) _okDown = false;
         setState(() => _hasFocus = f);
         widget.onFocus?.call(f);
         if (f) {
           Scrollable.ensureVisible(
             context,
             alignment: 0.5,
-            duration: const Duration(milliseconds: 160),
+            duration: lowEffects ? Duration.zero : const Duration(milliseconds: 160),
             curve: Curves.easeOut,
           );
         }
@@ -104,36 +134,51 @@ class _TvFocusableState extends State<TvFocusable> {
           onTap: widget.onSelect,
           onLongPress: widget.onLongPress,
           onSecondaryTap: widget.onLongPress,
-          child: AnimatedScale(
-            scale: _focused ? widget.scale : 1,
-            duration: const Duration(milliseconds: 140),
-            curve: Curves.easeOut,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 140),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(widget.borderRadius),
-                border: Border.all(
-                  color: _focused
-                      ? Brand.cyberMint
-                      : widget.selected
-                      ? Brand.cyberMint.withValues(alpha: 0.5)
-                      : active
-                      ? Brand.focusRing.withValues(alpha: 0.5)
-                      : Colors.transparent,
-                  width: _focused ? 2.5 : 1.5,
-                ),
-                boxShadow: _focused
-                    ? [BoxShadow(color: Brand.cyberMint.withValues(alpha: 0.28), blurRadius: 18, spreadRadius: 1)]
-                    : null,
-              ),
-              child: ClipRRect(borderRadius: BorderRadius.circular(widget.borderRadius - 1), child: widget.child),
-            ),
-          ),
+          child: _decorated(active),
         ),
       ),
     );
   }
+
+  Widget _decorated(bool active) {
+    final decoration = BoxDecoration(
+      borderRadius: BorderRadius.circular(widget.borderRadius),
+      border: Border.all(
+        color: _focused
+            ? Brand.cyberMint
+            : widget.selected
+            ? Brand.cyberMint.withValues(alpha: 0.5)
+            : active
+            ? Brand.focusRing.withValues(alpha: 0.5)
+            : Colors.transparent,
+        width: _focused ? 2.5 : 1.5,
+      ),
+      // A blurred glow is expensive on TV GPUs; TVs get a crisp ring instead.
+      boxShadow: _focused && !lowEffects
+          ? [BoxShadow(color: Brand.cyberMint.withValues(alpha: 0.28), blurRadius: 18, spreadRadius: 1)]
+          : null,
+    );
+    final clipped = ClipRRect(borderRadius: BorderRadius.circular(widget.borderRadius - 1), child: widget.child);
+    if (lowEffects) {
+      // No zoom/fade animations: every D-pad press repaints at once, nothing to tween.
+      return RepaintBoundary(
+        child: Transform.scale(
+          scale: _focused ? widget.scale : 1,
+          child: DecoratedBox(position: DecorationPosition.foreground, decoration: decoration, child: clipped),
+        ),
+      );
+    }
+    return AnimatedScale(
+      scale: _focused ? widget.scale : 1,
+      duration: const Duration(milliseconds: 140),
+      curve: Curves.easeOut,
+      child: AnimatedContainer(duration: const Duration(milliseconds: 140), decoration: decoration, child: clipped),
+    );
+  }
 }
+
+/// True on Android TV: skip animations, glows and big image decodes that make cheap boxes lag.
+bool get lowEffects => AppPlatform.isTv;
 
 /// Network image with a branded placeholder, decoded at display size to save memory on TV boxes.
 class NetImage extends StatelessWidget {
@@ -160,11 +205,11 @@ class NetImage extends StatelessWidget {
         return Image.network(
           u,
           fit: fit,
-          cacheWidth: w.clamp(32, 800),
+          cacheWidth: w.clamp(32, lowEffects ? 400 : 800),
           gaplessPlayback: true,
-          filterQuality: FilterQuality.medium,
+          filterQuality: lowEffects ? FilterQuality.low : FilterQuality.medium,
           errorBuilder: (_, _, _) => placeholder,
-          frameBuilder: (context, child, frame, sync) => sync
+          frameBuilder: (context, child, frame, sync) => sync || lowEffects
               ? child
               : AnimatedOpacity(
                   opacity: frame == null ? 0 : 1,
@@ -431,8 +476,95 @@ class TvTextKeys extends StatelessWidget {
       SingleActivator(LogicalKeyboardKey.arrowDown): DirectionalFocusIntent(TraversalDirection.down),
     },
     child: Actions(
-      actions: {_ShowKeyboardIntent: CallbackAction<_ShowKeyboardIntent>(onInvoke: (_) => showKeyboard())},
+      actions: {
+        _ShowKeyboardIntent: CallbackAction<_ShowKeyboardIntent>(onInvoke: (_) => showKeyboard()),
+        DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(onInvoke: (i) => moveFocus(i.direction)),
+      },
       child: child,
     ),
   );
+}
+
+/// Moves focus one step in [direction]; at the edge of a pane (a [FocusScope]) it carries
+/// on into whatever is next to that pane, such as the top bar above a list.
+bool moveFocus(TraversalDirection direction) {
+  final node = FocusManager.instance.primaryFocus;
+  if (node == null) return false;
+  if (node.focusInDirection(direction)) return true;
+  var scope = node.enclosingScope;
+  while (scope != null && scope.enclosingScope != null) {
+    if (scope.focusInDirection(direction)) return true;
+    scope = scope.enclosingScope;
+  }
+  return false;
+}
+
+/// Remote navigation between side-by-side panes (categories | list | preview).
+///
+/// Each pane is a [FocusScope] with one of [panes] (left to right). Left/right move inside
+/// a pane first and jump to the neighbouring pane at its edge, landing on the item that was
+/// focused there last. Back returns to the first pane (categories); from there it goes on
+/// to the home screen as usual.
+class PaneKeys extends StatelessWidget {
+  const PaneKeys({super.key, required this.panes, required this.child, this.backToFirst = true});
+
+  final List<FocusScopeNode> panes;
+  final Widget child;
+
+  /// Back from a later pane returns to the first one (off where Back should close instead).
+  final bool backToFirst;
+
+  static bool _inTextField(FocusNode? n) => n?.context?.findAncestorWidgetOfExactType<TvTextKeys>() != null;
+
+  /// Focuses [scope]: its last focused item, or its first item ([first] forces that).
+  static void focusPane(FocusScopeNode scope, {bool first = false}) {
+    final remembered = scope.focusedChild;
+    if (!first && remembered != null && remembered.context != null && remembered is! FocusScopeNode) {
+      remembered.requestFocus();
+      return;
+    }
+    final target = scope.traversalDescendants
+        .where((d) => d is! FocusScopeNode && d.canRequestFocus && !_inTextField(d))
+        .firstOrNull;
+    (target ?? scope).requestFocus();
+  }
+
+  KeyEventResult _onKey(FocusNode _, KeyEvent e) {
+    if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
+    final i = panes.indexWhere((p) => p.hasFocus);
+    if (i < 0) return KeyEventResult.ignored;
+    final k = e.logicalKey;
+    final primary = FocusManager.instance.primaryFocus;
+    if (k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.arrowLeft) {
+      if (_inTextField(primary)) return KeyEventResult.ignored; // moving the text cursor
+      final right = k == LogicalKeyboardKey.arrowRight;
+      if (primary != null && primary.focusInDirection(right ? TraversalDirection.right : TraversalDirection.left)) {
+        return KeyEventResult.handled;
+      }
+      for (var j = i + (right ? 1 : -1); j >= 0 && j < panes.length; j += right ? 1 : -1) {
+        if (panes[j].traversalDescendants.isNotEmpty) {
+          focusPane(panes[j]);
+          return KeyEventResult.handled;
+        }
+      }
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.arrowDown) {
+      if (_inTextField(primary)) return KeyEventResult.ignored; // TvTextKeys handles these
+      moveFocus(k == LogicalKeyboardKey.arrowUp ? TraversalDirection.up : TraversalDirection.down);
+      return KeyEventResult.handled;
+    }
+    if (backToFirst &&
+        e is KeyDownEvent &&
+        (k == LogicalKeyboardKey.goBack || k == LogicalKeyboardKey.escape) &&
+        i > 0) {
+      focusPane(panes.first);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      Focus(canRequestFocus: false, skipTraversal: true, onKeyEvent: _onKey, child: child);
 }

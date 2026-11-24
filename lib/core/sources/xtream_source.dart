@@ -52,14 +52,14 @@ class XtreamSource extends IptvSource {
         throw SourceException('Login rejected: check the username and password.');
       }
       if (res.statusCode != 200) throw SourceException('Server error (HTTP ${res.statusCode}).');
-      if (validate) _decode(res.bodyBytes); // never store a broken reply
+      if (validate) await IptvSource.offThread(_decode, res.bodyBytes, res.bodyBytes.length); // never store a broken reply
       return res.bodyBytes;
     }
 
     final bytes = _cacheableActions.contains(params['action'])
         ? await cachedBytes('xtream|$uri', () => load(validate: true))
         : await load();
-    return _decode(bytes);
+    return IptvSource.offThread(_decode, bytes, bytes.length);
   }
 
   static dynamic _decode(List<int> bytes) {

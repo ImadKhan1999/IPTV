@@ -35,6 +35,11 @@ class _LiveScreenState extends State<LiveScreen> {
   /// Plays the picked channel in the preview pane; full screen reuses it.
   PlayerController? _preview;
 
+  // Remote navigation: categories | channels | preview + guide.
+  final _catScope = FocusScopeNode(debugLabel: 'live categories');
+  final _listScope = FocusScopeNode(debugLabel: 'live channels');
+  final _sideScope = FocusScopeNode(debugLabel: 'live preview');
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +50,9 @@ class _LiveScreenState extends State<LiveScreen> {
   void dispose() {
     _filter.dispose();
     _preview?.dispose();
+    _catScope.dispose();
+    _listScope.dispose();
+    _sideScope.dispose();
     super.dispose();
   }
 
@@ -97,7 +105,14 @@ class _LiveScreenState extends State<LiveScreen> {
         }
       }
       if (!mounted || _categoryId != id) return;
+      final fromRemote = _catScope.hasFocus && FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
       setState(() => _channels = list);
+      // Picking a category with OK takes you straight to its first channel.
+      if (fromRemote && list.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) PaneKeys.focusPane(_listScope, first: true);
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -159,6 +174,14 @@ class _LiveScreenState extends State<LiveScreen> {
     if (c == null || !mounted) return; // hidden, locked or gone from the playlist
     _play(c);
     _openFullscreen();
+  }
+
+  Future<void> _toggleStar(String categoryId, String name) async {
+    final store = context.read<LibraryStore>();
+    final profileId = context.read<Session>().profile!.id;
+    final was = store.isFavoriteCategory(profileId, ContentType.live, categoryId);
+    await store.toggleFavoriteCategory(profileId, ContentType.live, categoryId);
+    _snack(was ? '"$name" unpinned' : '"$name" pinned to the top');
   }
 
   void _snack(String text) =>
@@ -294,7 +317,13 @@ class _LiveScreenState extends State<LiveScreen> {
     final session = context.watch<Session>();
     final profileId = session.profile!.id;
     final counts = session.counts[ContentType.live];
-    final visibleCats = Parental.visible(store, profileId, cats);
+    final visibleCats = store.favoriteCategoriesFirst(
+      profileId,
+      ContentType.live,
+      Parental.visible(store, profileId, cats),
+    );
+    bool starred(String id) => store.isFavoriteCategory(profileId, ContentType.live, id);
+    final realCats = {for (final c in cats) c.id};
     final entries = <(String, String, bool, int?)>[
       (Category.allId, 'All channels', false, counts?[Category.allId]),
       (_favoritesId, 'Favorites', false, store.favorites(profileId, ContentType.live).length),
@@ -343,10 +372,15 @@ class _LiveScreenState extends State<LiveScreen> {
                 for (final (id, name, locked, count) in entries)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text('${locked ? '🔒 ' : ''}$name${count != null ? '  ${formatCount(count)}' : ''}'),
-                      selected: id == _categoryId,
-                      onSelected: (_) => _openCategory(id),
+                    child: GestureDetector(
+                      onLongPress: realCats.contains(id) ? () => _toggleStar(id, name) : null,
+                      child: ChoiceChip(
+                        label: Text(
+                          '${starred(id) ? '★ ' : ''}${locked ? '🔒 ' : ''}$name${count != null ? '  ${formatCount(count)}' : ''}',
+                        ),
+                        selected: id == _categoryId,
+                        onSelected: (_) => _openCategory(id),
+                      ),
                     ),
                   ),
               ],
@@ -360,98 +394,117 @@ class _LiveScreenState extends State<LiveScreen> {
 
     final showSide = preview != null || width >= 1150;
     final playing = preview?.channel;
-    return Row(
-      children: [
-        SizedBox(
-          width: width >= 1300 ? 260 : 220,
-          child: FocusTraversalGroup(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
-              itemCount: entries.length,
-              itemBuilder: (_, i) {
-                final (id, name, locked, count) = entries[i];
-                final sel = id == _categoryId;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: TvFocusable(
-                    selected: sel,
-                    borderRadius: 10,
-                    scale: 1.02,
-                    onSelect: () => _openCategory(id),
-                    child: Container(
-                      color: sel ? Brand.cyberMint.withValues(alpha: 0.12) : Colors.transparent,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                      child: Row(
-                        children: [
-                          if (id == _favoritesId)
-                            const Padding(
-                              padding: EdgeInsets.only(right: 8),
-                              child: Icon(Icons.star_rounded, size: 18, color: Brand.warning),
-                            )
-                          else if (id.startsWith(_groupPrefix))
-                            const Padding(
-                              padding: EdgeInsets.only(right: 8),
-                              child: Icon(Icons.folder_special_rounded, size: 18, color: Brand.sky),
-                            ),
-                          Expanded(
-                            child: Text(
-                              name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: sel ? Brand.textPrimary : Brand.textSecondary,
-                                fontWeight: sel ? FontWeight.w600 : FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                          if (locked)
-                            const Icon(Icons.lock_rounded, size: 16, color: Brand.textMuted)
-                          else if (count != null)
-                            CountBadge(count: count, selected: sel),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-        const VerticalDivider(width: 1),
-        Expanded(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: _SearchField(controller: _filter, onChanged: () => setState(() {})),
-              ),
-              header,
-              Expanded(child: FocusTraversalGroup(child: channelList)),
-            ],
-          ),
-        ),
-        if (showSide) ...[
-          const VerticalDivider(width: 1),
+    return PaneKeys(
+      panes: [_catScope, _listScope, _sideScope],
+      child: Row(
+        children: [
           SizedBox(
-            width: width >= 1400 ? 520 : (width >= 1150 ? 440 : 380),
-            child: Column(
-              children: [
-                if (previewPane != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: AspectRatio(aspectRatio: 16 / 9, child: previewPane),
-                    ),
-                  ),
-                Expanded(
-                  child: _GuidePanel(channel: _focused ?? playing, compact: previewPane != null),
+            width: width >= 1300 ? 260 : 220,
+            child: FocusScope(
+              node: _catScope,
+              child: FocusTraversalGroup(
+                child: ListView.builder(
+                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
+                  itemCount: entries.length,
+                  itemBuilder: (_, i) {
+                    final (id, name, locked, count) = entries[i];
+                    final sel = id == _categoryId;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: TvFocusable(
+                        selected: sel,
+                        borderRadius: 10,
+                        scale: 1.02,
+                        onSelect: () => _openCategory(id),
+                        // Hold OK (or press the menu key) to star a category and keep it at the top.
+                        onLongPress: realCats.contains(id) ? () => _toggleStar(id, name) : null,
+                        child: Container(
+                          color: sel ? Brand.cyberMint.withValues(alpha: 0.12) : Colors.transparent,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                          child: Row(
+                            children: [
+                              if (id == _favoritesId)
+                                const Padding(
+                                  padding: EdgeInsets.only(right: 8),
+                                  child: Icon(Icons.star_rounded, size: 18, color: Brand.warning),
+                                )
+                              else if (id.startsWith(_groupPrefix))
+                                const Padding(
+                                  padding: EdgeInsets.only(right: 8),
+                                  child: Icon(Icons.folder_special_rounded, size: 18, color: Brand.sky),
+                                )
+                              else if (starred(id))
+                                const Padding(
+                                  padding: EdgeInsets.only(right: 8),
+                                  child: Icon(Icons.push_pin_rounded, size: 16, color: Brand.warning),
+                                ),
+                              Expanded(
+                                child: Text(
+                                  name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: sel ? Brand.textPrimary : Brand.textSecondary,
+                                    fontWeight: sel ? FontWeight.w600 : FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                              if (locked)
+                                const Icon(Icons.lock_rounded, size: 16, color: Brand.textMuted)
+                              else if (count != null)
+                                CountBadge(count: count, selected: sel),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
-              ],
+              ),
             ),
           ),
+          const VerticalDivider(width: 1),
+          Expanded(
+            child: FocusScope(
+              node: _listScope,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                    child: _SearchField(controller: _filter, onChanged: () => setState(() {})),
+                  ),
+                  header,
+                  Expanded(child: FocusTraversalGroup(child: channelList)),
+                ],
+              ),
+            ),
+          ),
+          if (showSide) ...[
+            const VerticalDivider(width: 1),
+            SizedBox(
+              width: width >= 1400 ? 520 : (width >= 1150 ? 440 : 380),
+              child: FocusScope(
+                node: _sideScope,
+                child: Column(
+                  children: [
+                    if (previewPane != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: AspectRatio(aspectRatio: 16 / 9, child: previewPane),
+                        ),
+                      ),
+                    Expanded(
+                      child: _GuidePanel(channel: _focused ?? playing, compact: previewPane != null),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }

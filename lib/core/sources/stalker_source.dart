@@ -75,16 +75,18 @@ class StalkerSource extends IptvSource {
     Future<List<int>> load({bool validate = false}) async {
       final res = await client.get(uri, headers: _headers).timeout(const Duration(seconds: 25));
       if (res.statusCode != 200) throw SourceException('Portal error (HTTP ${res.statusCode}).');
-      if (validate) _decode(res.bodyBytes); // never store a rejected or broken reply
+      if (validate) await IptvSource.offThread(_decode, res.bodyBytes, res.bodyBytes.length); // never store a rejected or broken reply
       return res.bodyBytes;
     }
 
     if (_cacheableActions.contains(params['action'])) {
       // The token changes every session, so the key is the portal, the MAC and the request.
       final key = 'stalker|$url|$mac|${(params.entries.toList()..sort((a, b) => a.key.compareTo(b.key))).join('&')}';
-      return _decode(await cachedBytes(key, () => load(validate: true)));
+      final bytes = await cachedBytes(key, () => load(validate: true));
+      return IptvSource.offThread(_decode, bytes, bytes.length);
     }
-    return _decode(await load());
+    final bytes = await load();
+    return IptvSource.offThread(_decode, bytes, bytes.length);
   }
 
   static dynamic _decode(List<int> bytes) {

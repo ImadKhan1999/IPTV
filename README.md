@@ -7,6 +7,10 @@
 
 iPTV plays the playlist from your own provider. It ships with no channels or content.
 
+![Home screen on a TV](docs/screenshots/home.png)
+
+![Channel list over the playing video](docs/screenshots/live-overlay.png)
+
 ![Live TV on a TV screen](docs/screenshots/live-tv.png)
 
 ## Features
@@ -15,6 +19,12 @@ iPTV plays the playlist from your own provider. It ships with no channels or con
 - **Add a playlist without typing**: the TV shows a QR code. Scan it with your phone, paste the link (or Xtream login, Stalker portal, or pick an .m3u file) and tap Send; the TV connects by itself. Works over your Wi-Fi with no account. There's also **Paste link**, and full Xtream links (`get.php?username=…&password=…`) are split into server, user and password automatically.
 - **Copy playlists to another TV**: Settings → *Send playlists to another device* finds other iPTV devices on the same Wi-Fi that have the QR screen open and sends all playlists in one press; the other device starts on the same playlist.
 - **Typing with the remote**: OK opens the on-screen keyboard in any text box and up/down move on to the next control.
+- **Set-top box Live TV** (default on Android TV): Live TV opens straight into full-screen video on your last channel. OK or ◀ slides in a see-through channel list over the picture (categories | channels, with what's on now and next); OK switches channel while the list stays open, up/down zap with the list hidden, Back closes it. *Settings → Live TV style* switches to the classic three-column screen.
+- **TV home screen**: big tiles for Live TV, Movies, Series, Favorites, Search and Settings, with the clock and account expiry. In a section, a slim top bar replaces the side menu; **Back** goes from the list to the categories, then to the home screen.
+- **Remote-first navigation**: left/right jump between categories, the list and the preview, landing where you were; picking a category with OK moves straight to its first channel or poster; hold OK for the menu.
+- **Pinned categories**: hold OK (or press the menu key, long-press on phones) on any Live, Movies or Series category to pin it to the top.
+- **Fast on low-RAM TV boxes**: big lists and playlists are parsed off the UI thread, logos and posters are decoded small, focus effects are drawn without blur or animation on TV, and player buffers are sized for 1-2 GB boxes.
+- **Smooth 2K/4K**: on Android TV the hardware decoder draws straight onto the screen (MediaCodec direct output), so 4K and HEVC streams don't stutter or crash. *Settings → Video output* switches to the compatible renderer if a channel shows a black picture.
 - **Live TV** with categories, channel numbers, logos, a filter box, and a now / next **TV guide** panel (XMLTV, gzip supported, or the provider's own EPG). Picking a channel plays it in a **preview beside the channel list**; pick it again or press full screen to go big, without restarting the stream.
 - **Counts everywhere**: how many channels, movies and series the playlist has, and how many are in each category.
 - **Movies and Series** with posters, ratings, plots, seasons and episodes, **resume where you left off**, and auto-play of the next episode.

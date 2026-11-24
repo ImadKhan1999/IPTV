@@ -16,6 +16,12 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   await AppPlatform.init();
+  if (AppPlatform.isTv) {
+    // Logos and posters are decoded small on TV; keep fewer of them in memory too.
+    PaintingBinding.instance.imageCache
+      ..maximumSize = 300
+      ..maximumSizeBytes = 48 * 1024 * 1024;
+  }
   final store = await LibraryStore.open();
   final cache = await DiskCache.open();
   runApp(IptvApp(store: store, cache: cache));

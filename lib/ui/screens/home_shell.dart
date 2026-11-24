@@ -15,6 +15,8 @@ import 'favorites_screen.dart';
 import 'live_screen.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
+import 'tv_home.dart';
+import '../player/live_overlay.dart';
 import 'vod_screen.dart';
 
 enum Section { live, movies, series, favorites, search, settings }
@@ -51,6 +53,76 @@ class _HomeShellState extends State<HomeShell> {
   Section _section = Section.live;
   bool _voiceSearch = false;
 
+  /// TV / desktop: the big-tile home screen is showing instead of a section.
+  late bool _home = _startOnHome();
+
+  /// The section the home screen should focus when it comes back.
+  Section? _lastOpened;
+
+  bool _startOnHome() {
+    // Opening straight into the last channel skips the home screen, like before.
+    final store = context.read<LibraryStore>();
+    if (liveFullscreenMode(store.player)) return true; // the player opens over Home instead
+    final profileId = store.activeProfile?.id;
+    final resume = store.player.startOnLastChannel && profileId != null && store.lastChannel(profileId) != null;
+    return !resume;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Set-top box mode: start on the last channel, full screen, once the playlist is ready.
+    final store = context.read<LibraryStore>();
+    final profileId = store.activeProfile?.id;
+    if (liveFullscreenMode(store.player) &&
+        store.player.startOnLastChannel &&
+        profileId != null &&
+        store.lastChannel(profileId) != null &&
+        !_autoStarted) {
+      _autoStarted = true;
+      _whenReady(() => openLiveFullscreen(context));
+    }
+  }
+
+  static bool _autoStarted = false;
+
+  void _whenReady(VoidCallback run) {
+    final session = context.read<Session>();
+    if (session.state == SessionState.ready) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) run();
+      });
+      return;
+    }
+    void listener() {
+      if (session.state == SessionState.ready) {
+        session.removeListener(listener);
+        if (mounted) run();
+      } else if (session.state == SessionState.error) {
+        session.removeListener(listener);
+      }
+    }
+
+    session.addListener(listener);
+  }
+
+  void _open(Section s) {
+    final store = context.read<LibraryStore>();
+    if (s == Section.live && _wideLayout && liveFullscreenMode(store.player)) {
+      // Set-top box style: Live TV is the picture itself, with the channel list over it.
+      setState(() => _lastOpened = s);
+      _whenReady(() => openLiveFullscreen(context, showList: true));
+      return;
+    }
+    setState(() {
+      _section = s;
+      _home = false;
+      _lastOpened = s;
+    });
+  }
+
+  void _goHome() => setState(() => _home = true);
+
   /// The remote's search key (or Ctrl+F) jumps to Search, listening right away on TV.
   KeyEventResult _onKey(FocusNode _, KeyEvent e) {
     if (e is! KeyDownEvent) return KeyEventResult.ignored;
@@ -60,7 +132,13 @@ class _HomeShellState extends State<HomeShell> {
       setState(() {
         _voiceSearch = !ctrlF && AppPlatform.voiceSupported;
         _section = Section.search;
+        _home = false;
       });
+      return KeyEventResult.handled;
+    }
+    // Back / Esc from any section returns to the home screen (TV and desktop).
+    if ((k == LogicalKeyboardKey.goBack || k == LogicalKeyboardKey.escape) && !_home && _wideLayout) {
+      _goHome();
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -75,9 +153,12 @@ class _HomeShellState extends State<HomeShell> {
     Section.settings => const SettingsScreen(),
   };
 
+  bool _wideLayout = false;
+
   @override
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width >= 720;
+    _wideLayout = wide;
     final session = context.watch<Session>();
     final features = session.source?.features ?? const <SourceFeature>{};
     final sections = Section.values.where((s) {
@@ -93,7 +174,53 @@ class _HomeShellState extends State<HomeShell> {
     if (!wide) {
       return Focus(onKeyEvent: _onKey, child: _phone(page, sections));
     }
-    return Focus(onKeyEvent: _onKey, child: _wide(page, sections));
+    // Android's Back button pops the route; on a section it should go home instead.
+    return PopScope(
+      canPop: _home,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !_home) _goHome();
+      },
+      child: Focus(onKeyEvent: _onKey, child: _home ? _homeScreen(sections) : _wide(page, sections)),
+    );
+  }
+
+  Widget _homeScreen(List<Section> sections) {
+    final store = context.watch<LibraryStore>();
+    final session = context.watch<Session>();
+    HomeTile tile(Section s, List<Color> colors, {bool big = false, String? subtitle}) => HomeTile(
+      id: s,
+      label: s.label,
+      icon: s.icon,
+      colors: colors,
+      big: big,
+      subtitle: subtitle,
+      count: switch (s) {
+        Section.live => session.total(ContentType.live),
+        Section.movies => session.total(ContentType.movie),
+        Section.series => session.total(ContentType.series),
+        Section.favorites => session.profile == null ? null : store.favorites(session.profile!.id).length,
+        _ => null,
+      },
+    );
+    return TvHome(
+      focusId: _lastOpened,
+      onOpen: (id) => _open(id as Section),
+      tiles: [
+        tile(
+          Section.live,
+          TileColors.live,
+          big: true,
+          subtitle: lastChannelLine(store, session) ?? 'Channels and TV guide',
+        ),
+        if (sections.contains(Section.movies))
+          tile(Section.movies, TileColors.movies, big: true, subtitle: 'Films on demand'),
+        if (sections.contains(Section.series))
+          tile(Section.series, TileColors.series, big: true, subtitle: 'Shows and episodes'),
+        tile(Section.favorites, TileColors.favorites, subtitle: 'Your starred channels and titles'),
+        tile(Section.search, TileColors.search, subtitle: 'Channels, movies, series, guide'),
+        tile(Section.settings, TileColors.settings, subtitle: 'Playlists, player, updates'),
+      ],
+    );
   }
 
   Widget _phone(Widget page, List<Section> sections) => Scaffold(
@@ -109,27 +236,32 @@ class _HomeShellState extends State<HomeShell> {
 
   Widget _wide(Widget page, List<Section> sections) {
     return Scaffold(
-      body: Row(
-        children: [
-          _SideRail(sections: sections, current: _section, onSelect: (s) => setState(() => _section = s)),
-          const VerticalDivider(width: 1),
-          Expanded(child: page),
-        ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            _TopBar(sections: sections, current: _section, onHome: _goHome, onSelect: _open),
+            const Divider(height: 1),
+            Expanded(child: page),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _SideRail extends StatelessWidget {
-  const _SideRail({required this.sections, required this.current, required this.onSelect});
+/// Slim bar above a section on TV / desktop: Home, the sections as tabs, and the clock.
+/// The tabs only switch section when chosen with OK, so moving the focus never loads
+/// a heavy screen by accident.
+class _TopBar extends StatelessWidget {
+  const _TopBar({required this.sections, required this.current, required this.onHome, required this.onSelect});
 
   final List<Section> sections;
   final Section current;
+  final VoidCallback onHome;
   final ValueChanged<Section> onSelect;
 
   @override
   Widget build(BuildContext context) {
-    final store = context.watch<LibraryStore>();
     final session = context.watch<Session>();
     int? countFor(Section s) => switch (s) {
       Section.live => session.total(ContentType.live),
@@ -137,68 +269,67 @@ class _SideRail extends StatelessWidget {
       Section.series => session.total(ContentType.series),
       _ => null,
     };
-    return Container(
-      width: 220,
-      color: Brand.slateObsidian,
-      child: SafeArea(
-        right: false,
-        child: FocusTraversalGroup(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Padding(padding: EdgeInsets.fromLTRB(20, 24, 20, 8), child: AppLogo(size: 36)),
-              if (store.activeProfile != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                  child: Text(
-                    store.activeProfile!.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Brand.textMuted, fontSize: 12),
-                  ),
+    Widget tab(Section s) {
+      final sel = s == current;
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 3),
+        child: TvFocusable(
+          selected: sel,
+          borderRadius: 10,
+          scale: 1.03,
+          onSelect: () => onSelect(s),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            color: sel ? Brand.cyberMint.withValues(alpha: 0.14) : Colors.transparent,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(s.icon, size: 18, color: sel ? Brand.cyberMint : Brand.textSecondary),
+                const SizedBox(width: 8),
+                Text(
+                  s.label,
+                  style: TextStyle(fontWeight: FontWeight.w600, color: sel ? Brand.textPrimary : Brand.textSecondary),
                 ),
-              for (final s in sections)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-                  child: TvFocusable(
-                    autofocus: s == current,
-                    selected: s == current,
-                    borderRadius: 12,
-                    scale: 1.02,
-                    // On TV, moving focus onto an item switches section like a TV launcher.
-                    onFocus: (f) {
-                      if (f && s != current && s != Section.search && s != Section.settings) onSelect(s);
-                    },
-                    onSelect: () => onSelect(s),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      color: s == current ? Brand.cyberMint.withValues(alpha: 0.12) : Colors.transparent,
-                      child: Row(
-                        children: [
-                          Icon(s.icon, color: s == current ? Brand.cyberMint : Brand.textSecondary),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Text(
-                              s.label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: s == current ? Brand.textPrimary : Brand.textSecondary,
-                              ),
-                            ),
-                          ),
-                          if (countFor(s) case final n?) CountBadge(count: n, selected: s == current),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              const Spacer(),
-              const Padding(padding: EdgeInsets.all(20), child: _Clock()),
-              const Padding(padding: EdgeInsets.fromLTRB(20, 0, 20, 20), child: ImadLabsMark(size: 22)),
-            ],
+                if (countFor(s) case final n?) ...[const SizedBox(width: 8), CountBadge(count: n, selected: sel)],
+              ],
+            ),
           ),
+        ),
+      );
+    }
+
+    return Container(
+      color: Brand.slateObsidian,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: FocusTraversalGroup(
+        child: Row(
+          children: [
+            TvFocusable(
+              borderRadius: 10,
+              scale: 1.03,
+              onSelect: onHome,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.home_rounded, color: Brand.cyberMint),
+                    SizedBox(width: 8),
+                    Text('Home', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(children: [for (final s in sections) tab(s)]),
+              ),
+            ),
+            const SizedBox(width: 12),
+            const _Clock(),
+          ],
         ),
       ),
     );
@@ -231,7 +362,7 @@ class _ClockState extends State<_Clock> {
   @override
   Widget build(BuildContext context) => Text(
     formatClock(_now),
-    style: const TextStyle(fontFamily: Brand.headingFont, fontSize: 28, fontWeight: FontWeight.w700),
+    style: const TextStyle(fontFamily: Brand.headingFont, fontSize: 22, fontWeight: FontWeight.w700),
   );
 }
 

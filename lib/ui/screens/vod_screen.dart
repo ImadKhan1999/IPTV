@@ -26,6 +26,8 @@ class _VodScreenState extends State<VodScreen> {
   List<Object>? _items; // Movie or Series
   String? _error;
   final _filter = TextEditingController();
+  final _catScope = FocusScopeNode(debugLabel: 'vod categories');
+  final _gridScope = FocusScopeNode(debugLabel: 'vod grid');
 
   @override
   void initState() {
@@ -36,6 +38,8 @@ class _VodScreenState extends State<VodScreen> {
   @override
   void dispose() {
     _filter.dispose();
+    _catScope.dispose();
+    _gridScope.dispose();
     super.dispose();
   }
 
@@ -75,7 +79,15 @@ class _VodScreenState extends State<VodScreen> {
       final items = widget.type == ContentType.movie
           ? await session.source!.movies(id)
           : await session.source!.series(id);
-      if (mounted && _categoryId == id) setState(() => _items = items);
+      if (!mounted || _categoryId != id) return;
+      final fromRemote = _catScope.hasFocus && FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+      setState(() => _items = items);
+      // Picking a category with OK moves straight onto its first poster.
+      if (fromRemote && items.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) PaneKeys.focusPane(_gridScope, first: true);
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -100,7 +112,20 @@ class _VodScreenState extends State<VodScreen> {
     final store = context.watch<LibraryStore>();
     final session = context.watch<Session>();
     final profileId = session.profile!.id;
-    final visible = Parental.visible(store, profileId, cats);
+    final visible = store.favoriteCategoriesFirst(profileId, widget.type, Parental.visible(store, profileId, cats));
+    bool starred(String id) => store.isFavoriteCategory(profileId, widget.type, id);
+    Future<void> toggleStar(Category c) async {
+      final was = starred(c.id);
+      await store.toggleFavoriteCategory(profileId, widget.type, c.id);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(was ? '"${c.name}" unpinned' : '"${c.name}" pinned to the top'),
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
+
     final wide = MediaQuery.sizeOf(context).width >= 900;
     final counts = session.counts[widget.type];
     final noun = widget.type == ContentType.movie ? 'movies' : 'series';
@@ -155,13 +180,16 @@ class _VodScreenState extends State<VodScreen> {
                 for (final c in visible)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(
-                        '${Parental.isLocked(store, profileId, c) ? '🔒 ' : ''}${c.name}'
-                        '${counts?[c.id] != null ? '  ${formatCount(counts![c.id]!)}' : ''}',
+                    child: GestureDetector(
+                      onLongPress: () => toggleStar(c),
+                      child: ChoiceChip(
+                        label: Text(
+                          '${starred(c.id) ? '★ ' : ''}${Parental.isLocked(store, profileId, c) ? '🔒 ' : ''}${c.name}'
+                          '${counts?[c.id] != null ? '  ${formatCount(counts![c.id]!)}' : ''}',
+                        ),
+                        selected: c.id == _categoryId,
+                        onSelected: (_) => _open(c.id),
                       ),
-                      selected: c.id == _categoryId,
-                      onSelected: (_) => _open(c.id),
                     ),
                   ),
               ],
@@ -173,61 +201,76 @@ class _VodScreenState extends State<VodScreen> {
       );
     }
 
-    return Row(
-      children: [
-        SizedBox(
-          width: 260,
-          child: FocusTraversalGroup(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
-              itemCount: visible.length,
-              itemBuilder: (_, i) {
-                final c = visible[i];
-                final sel = c.id == _categoryId;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: TvFocusable(
-                    selected: sel,
-                    borderRadius: 10,
-                    scale: 1.02,
-                    onSelect: () => _open(c.id),
-                    child: Container(
-                      color: sel ? Brand.cyberMint.withValues(alpha: 0.12) : Colors.transparent,
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              c.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: sel ? Brand.textPrimary : Brand.textSecondary),
-                            ),
+    return PaneKeys(
+      panes: [_catScope, _gridScope],
+      child: Row(
+        children: [
+          SizedBox(
+            width: 260,
+            child: FocusScope(
+              node: _catScope,
+              child: FocusTraversalGroup(
+                child: ListView.builder(
+                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
+                  itemCount: visible.length,
+                  itemBuilder: (_, i) {
+                    final c = visible[i];
+                    final sel = c.id == _categoryId;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: TvFocusable(
+                        selected: sel,
+                        borderRadius: 10,
+                        scale: 1.02,
+                        onSelect: () => _open(c.id),
+                        onLongPress: () => toggleStar(c),
+                        child: Container(
+                          color: sel ? Brand.cyberMint.withValues(alpha: 0.12) : Colors.transparent,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                          child: Row(
+                            children: [
+                              if (starred(c.id))
+                                const Padding(
+                                  padding: EdgeInsets.only(right: 8),
+                                  child: Icon(Icons.push_pin_rounded, size: 16, color: Brand.warning),
+                                ),
+                              Expanded(
+                                child: Text(
+                                  c.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: sel ? Brand.textPrimary : Brand.textSecondary),
+                                ),
+                              ),
+                              if (Parental.isLocked(store, profileId, c))
+                                const Icon(Icons.lock_rounded, size: 16, color: Brand.textMuted)
+                              else if (counts?[c.id] case final n?)
+                                CountBadge(count: n, selected: sel),
+                            ],
                           ),
-                          if (Parental.isLocked(store, profileId, c))
-                            const Icon(Icons.lock_rounded, size: 16, color: Brand.textMuted)
-                          else if (counts?[c.id] case final n?)
-                            CountBadge(count: n, selected: sel),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-                );
-              },
+                    );
+                  },
+                ),
+              ),
             ),
           ),
-        ),
-        const VerticalDivider(width: 1),
-        Expanded(
-          child: Column(
-            children: [
-              Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 0), child: search),
-              header,
-              Expanded(child: FocusTraversalGroup(child: grid)),
-            ],
+          const VerticalDivider(width: 1),
+          Expanded(
+            child: FocusScope(
+              node: _gridScope,
+              child: Column(
+                children: [
+                  Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 0), child: search),
+                  header,
+                  Expanded(child: FocusTraversalGroup(child: grid)),
+                ],
+              ),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

@@ -13,19 +13,24 @@ import '../../state/session.dart';
 import '../platform.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'live_overlay.dart';
 import 'player_controller.dart';
 
-export 'player_controller.dart' show PlayRequest, PlayStage, PlayerController;
+export 'player_controller.dart' show LiveTarget, PlayRequest, PlayStage, PlayerController;
 
 enum _Panel { none, volume, brightness }
 
 /// The full screen player. It either plays [request] with its own controller, or takes over
 /// a running [controller] (from the live preview) without restarting the stream.
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({super.key, this.request, this.controller}) : assert(request != null || controller != null);
+  const PlayerScreen({super.key, this.request, this.controller, this.startWithList = false})
+    : assert(request != null || controller != null);
 
   final PlayRequest? request;
   final PlayerController? controller;
+
+  /// Live TV: open with the see-through channel list showing.
+  final bool startWithList;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -37,8 +42,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final _rootFocus = FocusNode(debugLabel: 'player');
   final _playFocus = FocusNode(debugLabel: 'play-button');
 
-  bool _controls = true;
-  bool _channelList = false;
+  late bool _channelList = widget.startWithList;
+  late bool _controls = !_channelList;
   bool _info = false;
   bool _fullscreen = false;
   _Panel _panel = _Panel.none;
@@ -113,6 +118,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _hideTimer = Timer(const Duration(seconds: 5), () {
       if (mounted && _player.state.playing && !_channelList && _panel == _Panel.none) _hideControls();
     });
+  }
+
+  void _openList() {
+    _hideTimer?.cancel();
+    setState(() {
+      _controls = false;
+      _panel = _Panel.none;
+      _channelList = true;
+    });
+  }
+
+  void _closeList() {
+    setState(() => _channelList = false);
+    _rootFocus.requestFocus();
   }
 
   void _zap(int delta) {
@@ -279,6 +298,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     // With the controls hidden, the D-pad drives playback directly.
     if (!_controls && !_channelList) {
+      // TV live: OK or left opens the channel list over the picture, right shows the controls.
+      if (live && AppPlatform.isTv && isOverlayKey(k)) {
+        _openList();
+        return KeyEventResult.handled;
+      }
+      if (live && AppPlatform.isTv && k == LogicalKeyboardKey.arrowRight) {
+        _showControls();
+        return KeyEventResult.handled;
+      }
       if (_isKey(k, [LogicalKeyboardKey.select, LogicalKeyboardKey.enter, LogicalKeyboardKey.numpadEnter])) {
         _showControls();
         return KeyEventResult.handled;
@@ -293,7 +321,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.arrowRight) {
         if (live) {
-          setState(() => _channelList = true);
+          _openList();
         } else {
           _seek(k == LogicalKeyboardKey.arrowLeft ? -10 : 10);
         }
@@ -326,7 +354,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _onDragStart(DragStartDetails d) {
     final w = MediaQuery.sizeOf(context).width;
-    _dragBrightness = d.localPosition.dx < w / 2;
+    _dragBrightness = d.localPosition.dx < w / 2 && !PlayerController.directOutput(_c.store.player) ? true : false;
   }
 
   void _onDragUpdate(DragUpdateDetails d) {
@@ -415,20 +443,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         width: 340,
                         child: StreamInfoPanel(controller: _c, onClose: () => setState(() => _info = false)),
                       ),
-                    if (_channelList && _c.isLive)
-                      _ChannelListOverlay(
-                        channels: _c.request.channels,
-                        current: _c.index,
-                        onPick: (i) {
-                          setState(() => _channelList = false);
-                          _rootFocus.requestFocus();
-                          _c.jumpTo(i);
-                        },
-                        onClose: () {
-                          setState(() => _channelList = false);
-                          _rootFocus.requestFocus();
-                        },
-                      ),
+                    if (_channelList && _c.isLive) LiveOverlay(controller: _c, onClose: _closeList),
                   ],
                 ],
               ),
@@ -532,12 +547,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
           ),
-        _CtrlButton(
-          icon: Icons.brightness_6_rounded,
-          tooltip: 'Brightness',
-          active: _panel == _Panel.brightness,
-          onPressed: () => _togglePanel(_Panel.brightness),
-        ),
+        // Direct (MediaCodec) output draws video outside the renderer, so no picture brightness.
+        if (!PlayerController.directOutput(_c.store.player))
+          _CtrlButton(
+            icon: Icons.brightness_6_rounded,
+            tooltip: 'Brightness',
+            active: _panel == _Panel.brightness,
+            onPressed: () => _togglePanel(_Panel.brightness),
+          ),
       ],
     );
 
@@ -545,11 +562,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (live) ...[
-          _CtrlButton(
-            icon: Icons.list_rounded,
-            tooltip: 'Channels',
-            onPressed: () => setState(() => _channelList = true),
-          ),
+          _CtrlButton(icon: Icons.list_rounded, tooltip: 'Channels', onPressed: _openList),
           if (profileId != null)
             _CtrlButton(
               icon: fav ? Icons.star_rounded : Icons.star_outline_rounded,
@@ -1290,80 +1303,3 @@ class _SeekBarState extends State<_SeekBar> {
 }
 
 /// Side list for switching channels without leaving the player.
-class _ChannelListOverlay extends StatelessWidget {
-  const _ChannelListOverlay({
-    required this.channels,
-    required this.current,
-    required this.onPick,
-    required this.onClose,
-  });
-
-  final List<Channel> channels;
-  final int current;
-  final ValueChanged<int> onPick;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: GestureDetector(
-            onTap: onClose,
-            child: Container(color: Colors.black38),
-          ),
-        ),
-        Positioned(
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: 380,
-          child: Container(
-            color: Brand.slateObsidian.withValues(alpha: 0.95),
-            child: SafeArea(
-              right: false,
-              child: ListView.builder(
-                controller: ScrollController(initialScrollOffset: (current * 60.0 - 200).clamp(0, double.infinity)),
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-                itemCount: channels.length,
-                itemExtent: 60,
-                itemBuilder: (_, i) {
-                  final c = channels[i];
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: TvFocusable(
-                      autofocus: i == current,
-                      selected: i == current,
-                      borderRadius: 10,
-                      scale: 1.02,
-                      onSelect: () => onPick(i),
-                      child: Container(
-                        color: i == current ? Brand.cyberMint.withValues(alpha: 0.12) : Colors.transparent,
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: Row(
-                          children: [
-                            SizedBox(
-                              width: 40,
-                              child: Text('${c.number ?? i + 1}', style: const TextStyle(color: Brand.textMuted)),
-                            ),
-                            SizedBox(
-                              width: 56,
-                              height: 36,
-                              child: NetImage(c.logo, fit: BoxFit.contain, cacheWidth: 112),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(child: Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}

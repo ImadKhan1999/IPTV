@@ -10,6 +10,8 @@ import 'package:iptv/core/sources/m3u_source.dart';
 import 'package:iptv/data/library_store.dart';
 import 'package:iptv/main.dart';
 import 'package:iptv/ui/widgets/pair_card.dart';
+import 'package:iptv/ui/player/live_overlay.dart';
+import 'package:iptv/ui/player/player_screen.dart';
 import 'package:iptv/state/session.dart';
 import 'package:iptv/ui/screens/home_shell.dart';
 import 'package:iptv/ui/theme.dart';
@@ -96,6 +98,16 @@ void main() {
 
   testWidgets('welcome', (t) => shoot(t, const Size(1920, 1080), IptvApp(store: LibraryStore.memory(), checkUpdates: false), 'welcome'));
 
+  testWidgets('home', (t) async {
+    final (store, session) = await connected();
+    await shoot(t, const Size(1920, 1080), wrap(store, session), 'home');
+  });
+
+  testWidgets('home on a 1080p TV (960x540 logical)', (t) async {
+    final (store, session) = await connected();
+    await shoot(t, const Size(960, 540), wrap(store, session), 'home-tv');
+  });
+
   testWidgets('live tv', (t) async {
     final (store, session) = await connected();
     await shoot(
@@ -104,9 +116,23 @@ void main() {
       wrap(store, session),
       'live-tv',
       before: () async {
-        await t.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-        await t.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await t.sendKeyEvent(LogicalKeyboardKey.enter);
+        await t.pumpAndSettle();
         await t.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      },
+    );
+  });
+
+  testWidgets('live tv on a 1080p TV', (t) async {
+    final (store, session) = await connected();
+    await shoot(
+      t,
+      const Size(960, 540),
+      wrap(store, session),
+      'live-tv-small',
+      before: () async {
+        await t.sendKeyEvent(LogicalKeyboardKey.enter);
+        await t.pumpAndSettle();
       },
     );
   });
@@ -119,10 +145,56 @@ void main() {
       wrap(store, session),
       'movies',
       before: () async {
-        await t.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await t.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await t.sendKeyEvent(LogicalKeyboardKey.enter);
         await t.pumpAndSettle();
         await t.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-        await t.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      },
+    );
+  });
+
+  testWidgets('live overlay (set-top box style)', (t) async {
+    final (store, session) = await connected();
+    final channels = await session.source!.channels(Category.allId);
+    final target = _FakeLive(PlayRequest.live(channels, 2));
+    await shoot(
+      t,
+      const Size(1920, 1080),
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider.value(value: store),
+          ChangeNotifierProvider.value(value: session),
+        ],
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: buildTheme(),
+          home: Scaffold(
+            backgroundColor: Colors.black,
+            body: Stack(
+              fit: StackFit.expand,
+              children: [
+                // Stand-in for the playing video.
+                const DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF3B6E8F), Color(0xFF8F5A3B), Color(0xFF2E4A2E)],
+                    ),
+                  ),
+                  child: Center(
+                    child: Text('▶  Live video keeps playing', style: TextStyle(fontSize: 48, color: Colors.white70)),
+                  ),
+                ),
+                LiveOverlay(controller: target, onClose: () {}),
+              ],
+            ),
+          ),
+        ),
+      ),
+      'live-overlay',
+      before: () async {
+        await t.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       },
     );
   });
@@ -131,4 +203,22 @@ void main() {
     final (store, session) = await connected();
     await shoot(t, const Size(420, 900), wrap(store, session), 'phone-live');
   });
+}
+
+class _FakeLive implements LiveTarget {
+  _FakeLive(this.request) : index = request.index;
+
+  @override
+  PlayRequest request;
+  @override
+  int index;
+
+  @override
+  Channel? get channel => request.channels[index];
+
+  @override
+  void replace(PlayRequest r) {
+    request = r;
+    index = r.index;
+  }
 }
