@@ -326,7 +326,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _onDragStart(DragStartDetails d) {
     final w = MediaQuery.sizeOf(context).width;
-    _dragBrightness = d.localPosition.dx < w / 2;
+    _dragBrightness = d.localPosition.dx < w / 2 && !PlayerController.directOutput(_c.store.player) ? true : false;
   }
 
   void _onDragUpdate(DragUpdateDetails d) {
@@ -532,12 +532,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
           ),
-        _CtrlButton(
-          icon: Icons.brightness_6_rounded,
-          tooltip: 'Brightness',
-          active: _panel == _Panel.brightness,
-          onPressed: () => _togglePanel(_Panel.brightness),
-        ),
+        // Direct (MediaCodec) output draws video outside the renderer, so no picture brightness.
+        if (!PlayerController.directOutput(_c.store.player))
+          _CtrlButton(
+            icon: Icons.brightness_6_rounded,
+            tooltip: 'Brightness',
+            active: _panel == _Panel.brightness,
+            onPressed: () => _togglePanel(_Panel.brightness),
+          ),
       ],
     );
 

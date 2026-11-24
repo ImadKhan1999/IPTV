@@ -174,6 +174,7 @@ class PlayerSettings {
     this.liveFormat = 'ts',
     this.refreshHours = 24,
     this.startOnLastChannel = true,
+    this.videoOutput = 'auto',
   });
 
   final bool hardwareDecoding;
@@ -189,6 +190,10 @@ class PlayerSettings {
   /// Open straight into the channel watched last, playing.
   final bool startOnLastChannel;
 
+  /// Android video path: 'auto' (direct on TV), 'direct' (MediaCodec straight to the screen:
+  /// fastest, smooth 4K, no picture brightness / styled subtitles) or 'compat' (GPU renderer).
+  final String videoOutput;
+
   PlayerSettings copyWith({
     bool? hardwareDecoding,
     int? bufferSeconds,
@@ -197,6 +202,7 @@ class PlayerSettings {
     String? liveFormat,
     int? refreshHours,
     bool? startOnLastChannel,
+    String? videoOutput,
   }) => PlayerSettings(
     hardwareDecoding: hardwareDecoding ?? this.hardwareDecoding,
     bufferSeconds: bufferSeconds ?? this.bufferSeconds,
@@ -205,6 +211,7 @@ class PlayerSettings {
     liveFormat: liveFormat ?? this.liveFormat,
     refreshHours: refreshHours ?? this.refreshHours,
     startOnLastChannel: startOnLastChannel ?? this.startOnLastChannel,
+    videoOutput: videoOutput ?? this.videoOutput,
   );
 
   Map<String, dynamic> toJson() => {
@@ -215,6 +222,7 @@ class PlayerSettings {
     'liveFormat': liveFormat,
     'refreshHours': refreshHours,
     'startOnLastChannel': startOnLastChannel,
+    'videoOutput': videoOutput,
   };
 
   factory PlayerSettings.fromJson(Map<String, dynamic> j) => PlayerSettings(
@@ -225,6 +233,7 @@ class PlayerSettings {
     liveFormat: j['liveFormat'] as String? ?? 'ts',
     refreshHours: j['refreshHours'] as int? ?? 24,
     startOnLastChannel: j['startOnLastChannel'] as bool? ?? true,
+    videoOutput: j['videoOutput'] as String? ?? 'auto',
   );
 }
 
@@ -265,6 +274,9 @@ class LibraryStore extends ChangeNotifier {
   final List<ChannelGroup> _groups = [];
   final Set<String> _hidden = {};
 
+  /// Starred categories per playlist and type ('profileId|live' -> category ids, in starring order).
+  final Map<String, List<String>> _favCats = {};
+
   /// Favorites in the user's order, per "profileId|type".
   final Map<String, List<String>> _favOrder = {};
   DateTime? lastUpdateCheck;
@@ -297,6 +309,7 @@ class LibraryStore extends ChangeNotifier {
       lockedCategories.addAll((j['lockedCategories'] as List? ?? []).cast<String>());
       _groups.addAll((j['groups'] as List? ?? []).map((e) => ChannelGroup.fromJson((e as Map).cast())));
       _hidden.addAll((j['hidden'] as List? ?? []).cast<String>());
+      ((j['favCategories'] as Map?) ?? {}).forEach((k, v) => _favCats['$k'] = (v as List).cast<String>().toList());
       ((j['favOrder'] as Map?) ?? {}).forEach((k, v) => _favOrder['$k'] = (v as List).cast<String>().toList());
       lastUpdateCheck = DateTime.tryParse(j['lastUpdateCheck'] as String? ?? '');
       activeProfileId = j['activeProfileId'] as String?;
@@ -330,6 +343,7 @@ class LibraryStore extends ChangeNotifier {
           'lockedCategories': lockedCategories.toList(),
           'groups': _groups.map((g) => g.toJson()).toList(),
           'hidden': _hidden.toList(),
+          'favCategories': _favCats,
           'favOrder': _favOrder,
           'lastUpdateCheck': lastUpdateCheck?.toIso8601String(),
           'activeProfileId': activeProfileId,
@@ -369,6 +383,7 @@ class LibraryStore extends ChangeNotifier {
     _groups.removeWhere((g) => g.profileId == id);
     _hidden.removeWhere((k) => k.startsWith('$id|'));
     _favOrder.removeWhere((k, _) => k.startsWith('$id|'));
+    _favCats.removeWhere((k, _) => k.startsWith('$id|'));
     if (activeProfileId == id) activeProfileId = profiles.isEmpty ? null : profiles.first.id;
     return _save();
   }
@@ -468,6 +483,28 @@ class LibraryStore extends ChangeNotifier {
   Future<void> setHidden(String profileId, String channelId, bool hidden) {
     hidden ? _hidden.add('$profileId|$channelId') : _hidden.remove('$profileId|$channelId');
     return _save();
+  }
+
+  // Favorite categories -----------------------------------------------------
+
+  bool isFavoriteCategory(String profileId, ContentType type, String categoryId) =>
+      _favCats['$profileId|${type.name}']?.contains(categoryId) ?? false;
+
+  Future<void> toggleFavoriteCategory(String profileId, ContentType type, String categoryId) {
+    final list = _favCats.putIfAbsent('$profileId|${type.name}', () => []);
+    list.contains(categoryId) ? list.remove(categoryId) : list.add(categoryId);
+    if (list.isEmpty) _favCats.remove('$profileId|${type.name}');
+    return _save();
+  }
+
+  /// [categories] with the starred ones moved to the top (in the order they were starred).
+  List<Category> favoriteCategoriesFirst(String profileId, ContentType type, List<Category> categories) {
+    final fav = _favCats['$profileId|${type.name}'];
+    if (fav == null || fav.isEmpty) return categories;
+    final rank = {for (final (i, id) in fav.indexed) id: i};
+    final starred = categories.where((c) => rank.containsKey(c.id)).toList()
+      ..sort((a, b) => rank[a.id]!.compareTo(rank[b.id]!));
+    return [...starred, ...categories.where((c) => !rank.containsKey(c.id))];
   }
 
   Future<void> markUpdateCheck() {

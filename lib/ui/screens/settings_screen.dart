@@ -5,6 +5,7 @@ import '../../core/models.dart';
 import '../../data/library_store.dart';
 import '../../data/updater.dart';
 import '../../state/session.dart';
+import '../platform.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/parental.dart';
@@ -196,6 +197,24 @@ class SettingsScreen extends StatelessWidget {
           value: store.player.hardwareDecoding,
           onChanged: (v) => store.updatePlayer(store.player.copyWith(hardwareDecoding: v)),
         ),
+        if (AppPlatform.isAndroid)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Video output'),
+            subtitle: const Text(
+              'Direct is the fastest and plays 2K/4K smoothly (picture brightness is not available). '
+              'Try Compatible if a channel shows a black picture.',
+            ),
+            trailing: DropdownButton<String>(
+              value: store.player.videoOutput,
+              items: const [
+                DropdownMenuItem(value: 'auto', child: Text('Auto')),
+                DropdownMenuItem(value: 'direct', child: Text('Direct')),
+                DropdownMenuItem(value: 'compat', child: Text('Compatible')),
+              ],
+              onChanged: (v) => store.updatePlayer(store.player.copyWith(videoOutput: v)),
+            ),
+          ),
         ListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Buffer'),

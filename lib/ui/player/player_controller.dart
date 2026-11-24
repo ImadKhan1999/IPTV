@@ -68,11 +68,16 @@ class PlayerController extends ChangeNotifier {
       _index = request.index {
     final settings = store.player;
     player = Player(
-      configuration: const PlayerConfiguration(title: 'iPTV', bufferSize: 64 * 1024 * 1024, logLevel: MPVLogLevel.warn),
+      // TV boxes often have 1-2 GB of RAM: keep the network buffers smaller there.
+      configuration: PlayerConfiguration(
+        title: 'iPTV',
+        bufferSize: (AppPlatform.isTv ? 24 : 64) * 1024 * 1024,
+        logLevel: MPVLogLevel.warn,
+      ),
     );
     video = VideoController(
       player,
-      configuration: VideoControllerConfiguration(enableHardwareAcceleration: settings.hardwareDecoding),
+      configuration: videoConfiguration(settings),
     );
     _tune(settings);
 
@@ -193,14 +198,42 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// True when Android decodes straight onto the screen (MediaCodec, no GPU copy).
+  static bool directOutput(PlayerSettings s) =>
+      AppPlatform.isAndroid &&
+      s.hardwareDecoding &&
+      (s.videoOutput == 'direct' || (s.videoOutput == 'auto' && AppPlatform.isTv));
+
+  /// How video gets to the screen. On Android TV the hardware decoder draws straight onto
+  /// the display surface, so 2K/4K and HEVC 10-bit play without copying every frame through
+  /// the GPU (which is what made big streams stutter or crash on low-memory boxes).
+  static VideoControllerConfiguration videoConfiguration(PlayerSettings s) {
+    if (directOutput(s)) {
+      return const VideoControllerConfiguration(vo: 'mediacodec_embed', hwdec: 'mediacodec');
+    }
+    if (AppPlatform.isAndroid && s.hardwareDecoding) {
+      // GPU renderer with hardware decoding; never fall back to slow software decode silently.
+      return const VideoControllerConfiguration(hwdec: 'mediacodec-copy');
+    }
+    return VideoControllerConfiguration(enableHardwareAcceleration: s.hardwareDecoding);
+  }
+
   /// mpv settings that make IPTV streams start fast and survive network hiccups.
   Future<void> _tune(PlayerSettings s) async {
     await _set('cache', 'yes');
     await _set('cache-secs', '${s.bufferSeconds}');
     await _set('demuxer-readahead-secs', '${s.bufferSeconds}');
-    await _set('demuxer-max-bytes', '${64 * 1024 * 1024}');
-    await _set('demuxer-max-back-bytes', '${16 * 1024 * 1024}');
+    final tv = AppPlatform.isTv;
+    // Enough for ~8 s of a 40 Mbit/s 4K stream without starving a 1.5 GB box.
+    await _set('demuxer-max-bytes', '${(tv ? 48 : 64) * 1024 * 1024}');
+    await _set('demuxer-max-back-bytes', '${(tv ? 4 : 16) * 1024 * 1024}');
     await _set('network-timeout', '15');
+    // High-bitrate streams: drop a late frame instead of freezing, decode with all cores,
+    // and let the decoder write frames directly (fewer copies of every 4K frame).
+    await _set('framedrop', 'vo');
+    await _set('vd-lavc-threads', '0');
+    await _set('vd-lavc-dr', 'yes');
+    await _set('hwdec-codecs', 'h264,hevc,mpeg2video,vp8,vp9,av1');
     await _set('stream-lavf-o', 'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5');
     await _set('hls-bitrate', 'max');
     await _set('tls-verify', 'no');

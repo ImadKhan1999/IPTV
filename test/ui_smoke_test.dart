@@ -45,7 +45,7 @@ void main() {
     expect(find.text('MAC address'), findsOneWidget);
   });
 
-  testWidgets('TV layout: rail, categories and channels, D-pad moves focus', (tester) async {
+  testWidgets('TV layout: home tiles, then categories and channels with the D-pad', (tester) async {
     tester.view.physicalSize = const Size(1920, 1080);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -59,15 +59,84 @@ void main() {
 
     await tester.pumpWidget(_app(store, session, const HomeShell()));
     await tester.pumpAndSettle();
+    // Home screen with big tiles; Live TV is focused.
     expect(find.text('Live TV'), findsOneWidget);
-    expect(find.text('Movies'), findsWidgets);
-    expect(find.text('News One'), findsOneWidget);
-    expect(find.text('Sports One'), findsOneWidget);
+    expect(find.text('Movies'), findsOneWidget);
+    expect(find.text('Settings'), findsOneWidget);
 
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('News One'), findsWidgets);
+    expect(find.text('Sports One'), findsWidgets);
+
+    String? focusedText() {
+      final ctx = FocusManager.instance.primaryFocus?.context;
+      if (ctx == null) return null;
+      final texts = <String>[];
+      void visit(Element e) {
+        final w = e.widget;
+        if (w is Text && w.data != null) texts.add(w.data!);
+        e.visitChildren(visit);
+      }
+
+      (ctx as Element).visitChildren(visit);
+      return texts.join(' | ');
+    }
+
+    // Left jumps from the channels to the categories.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    expect(focusedText(), contains('All channels'));
+    // Pick "Sports" with OK: focus lands on its first channel.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown); // Favorites
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown); // first real category
+    await tester.pumpAndSettle();
+    final cat = focusedText();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(focusedText(), isNot(cat));
+    expect(focusedText(), anyOf(contains('News One'), contains('Sports One')));
+    // Up from the first category climbs out of the pane to the top bar.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 4; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    }
+    await tester.pumpAndSettle();
+    expect(focusedText(), anyOf(contains('Home'), contains('Live TV'), contains('Movies')));
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    // Back returns to the categories, Back again to the home screen.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(focusedText(), cat);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.text('Channels and TV guide'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('categories can be pinned to the top', (tester) async {
+    final store = LibraryStore.memory();
+    final cats = [
+      const Category(id: 'a', name: 'A', type: ContentType.live),
+      const Category(id: 'b', name: 'B', type: ContentType.live),
+      const Category(id: 'c', name: 'C', type: ContentType.live),
+    ];
+    await store.toggleFavoriteCategory('p', ContentType.live, 'c');
+    await store.toggleFavoriteCategory('p', ContentType.live, 'b');
+    expect(store.favoriteCategoriesFirst('p', ContentType.live, cats).map((c) => c.id), ['c', 'b', 'a']);
+    expect(store.favoriteCategoriesFirst('p', ContentType.movie, cats).map((c) => c.id), ['a', 'b', 'c']);
+    await store.toggleFavoriteCategory('p', ContentType.live, 'c');
+    expect(store.isFavoriteCategory('p', ContentType.live, 'c'), isFalse);
   });
 
   testWidgets('phone layout uses a bottom bar', (tester) async {

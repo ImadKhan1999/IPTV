@@ -96,6 +96,16 @@ void main() {
 
   testWidgets('welcome', (t) => shoot(t, const Size(1920, 1080), IptvApp(store: LibraryStore.memory(), checkUpdates: false), 'welcome'));
 
+  testWidgets('home', (t) async {
+    final (store, session) = await connected();
+    await shoot(t, const Size(1920, 1080), wrap(store, session), 'home');
+  });
+
+  testWidgets('home on a 1080p TV (960x540 logical)', (t) async {
+    final (store, session) = await connected();
+    await shoot(t, const Size(960, 540), wrap(store, session), 'home-tv');
+  });
+
   testWidgets('live tv', (t) async {
     final (store, session) = await connected();
     await shoot(
@@ -104,9 +114,23 @@ void main() {
       wrap(store, session),
       'live-tv',
       before: () async {
-        await t.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-        await t.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await t.sendKeyEvent(LogicalKeyboardKey.enter);
+        await t.pumpAndSettle();
         await t.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      },
+    );
+  });
+
+  testWidgets('live tv on a 1080p TV', (t) async {
+    final (store, session) = await connected();
+    await shoot(
+      t,
+      const Size(960, 540),
+      wrap(store, session),
+      'live-tv-small',
+      before: () async {
+        await t.sendKeyEvent(LogicalKeyboardKey.enter);
+        await t.pumpAndSettle();
       },
     );
   });
@@ -119,9 +143,9 @@ void main() {
       wrap(store, session),
       'movies',
       before: () async {
-        await t.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-        await t.pumpAndSettle();
         await t.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await t.sendKeyEvent(LogicalKeyboardKey.enter);
+        await t.pumpAndSettle();
         await t.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       },
     );

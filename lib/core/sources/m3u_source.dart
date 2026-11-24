@@ -35,7 +35,7 @@ class M3uSource extends IptvSource {
     if (!text.contains('#EXTINF') && !text.contains('://')) {
       throw SourceException('This does not look like an M3U playlist.');
     }
-    loadFromText(text);
+    _loadPlaylist(await IptvSource.offThread(M3uParser.parse, text, text.length));
     if (_channels.isEmpty && _movies.isEmpty && _series.isEmpty) {
       throw SourceException('The playlist is empty.');
     }
@@ -43,8 +43,9 @@ class M3uSource extends IptvSource {
   }
 
   /// Parses [text] directly (also used by tests).
-  void loadFromText(String text) {
-    final pl = M3uParser.parse(text);
+  void loadFromText(String text) => _loadPlaylist(M3uParser.parse(text));
+
+  void _loadPlaylist(M3uPlaylist pl) {
     _playlist = pl;
     _channels.clear();
     _movies.clear();

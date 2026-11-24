@@ -1,3 +1,5 @@
+import 'dart:isolate';
+
 import 'package:http/http.dart' as http;
 
 import '../../data/disk_cache.dart';
@@ -54,6 +56,13 @@ abstract class IptvSource {
   Future<Map<String, int>?> categoryCounts(ContentType type) async => null;
 
   /// Counts items per category id and adds the total under [Category.allId].
+  /// Runs [work] on a background isolate when [size] is large, so parsing a big playlist or
+  /// channel list never freezes the UI (TV boxes have slow CPUs). Small inputs run inline.
+  static Future<R> offThread<A, R>(R Function(A) work, A input, int size) {
+    if (size < 128 * 1024) return Future.sync(() => work(input));
+    return Isolate.run(() => work(input));
+  }
+
   static Map<String, int> countByCategory(Iterable<String> categoryIds) {
     final out = <String, int>{};
     var total = 0;
