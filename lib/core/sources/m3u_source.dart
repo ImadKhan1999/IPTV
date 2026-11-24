@@ -23,7 +23,7 @@ class M3uSource extends IptvSource {
     if (_movies.isNotEmpty) SourceFeature.movies,
     if (_series.isNotEmpty) SourceFeature.series,
     if (xmltvUrl != null) SourceFeature.epg,
-    if (_channels.any((c) => c.hasCatchup)) SourceFeature.catchup,
+    if (_catchup) SourceFeature.catchup,
   };
 
   @override
@@ -35,7 +35,9 @@ class M3uSource extends IptvSource {
     if (!text.contains('#EXTINF') && !text.contains('://')) {
       throw SourceException('This does not look like an M3U playlist.');
     }
-    _loadPlaylist(await IptvSource.offThread(M3uParser.parse, text, text.length));
+    // Parsing and building every channel object happens on a background thread, so a big
+    // playlist never freezes the screen (TV boxes have slow CPUs).
+    _apply(await IptvSource.offThread(_parseAndBuild, text, text.length));
     if (_channels.isEmpty && _movies.isEmpty && _series.isEmpty) {
       throw SourceException('The playlist is empty.');
     }
@@ -43,20 +45,37 @@ class M3uSource extends IptvSource {
   }
 
   /// Parses [text] directly (also used by tests).
-  void loadFromText(String text) => _loadPlaylist(M3uParser.parse(text));
+  void loadFromText(String text) => _apply(_parseAndBuild(text));
 
-  void _loadPlaylist(M3uPlaylist pl) {
-    _playlist = pl;
-    _channels.clear();
-    _movies.clear();
-    _series.clear();
+  static _Built _parseAndBuild(String text) => _build(M3uParser.parse(text));
+
+  bool _catchup = false;
+
+  void _apply(_Built b) {
+    _playlist = b.playlist;
+    _channels
+      ..clear()
+      ..addAll(b.channels);
+    _movies
+      ..clear()
+      ..addAll(b.movies);
+    _series
+      ..clear()
+      ..addAll(b.series);
+    _catchup = b.channels.any((c) => c.hasCatchup);
+  }
+
+  static _Built _build(M3uPlaylist pl) {
+    final channels = <Channel>[];
+    final movies = <Movie>[];
+    final series = <String, _SeriesBuilder>{};
     var index = 0;
     for (final e in pl.entries) {
       index++;
       final group = e.group.isEmpty ? 'Uncategorised' : e.group;
       switch (e.contentType) {
         case ContentType.live:
-          _channels.add(
+          channels.add(
             Channel(
               id: 'm3u:$index',
               name: e.name,
@@ -72,7 +91,7 @@ class M3uSource extends IptvSource {
             ),
           );
         case ContentType.movie:
-          _movies.add(
+          movies.add(
             Movie(
               id: 'm3u:$index',
               name: e.name,
@@ -85,11 +104,11 @@ class M3uSource extends IptvSource {
         case ContentType.series:
           final parsed = _splitEpisodeName(e.name);
           final key = '$group|${parsed.show.toLowerCase()}';
-          final b = _series.putIfAbsent(
+          final b = series.putIfAbsent(
             key,
             () => _SeriesBuilder(
               Series(
-                id: 'm3u-series:${_series.length + 1}',
+                id: 'm3u-series:${series.length + 1}',
                 name: parsed.show,
                 poster: e.attr('tvg-logo'),
                 categoryId: group,
@@ -109,6 +128,13 @@ class M3uSource extends IptvSource {
           );
       }
     }
+    // The parsed entries are not needed any more; only the playlist's own settings are kept.
+    return (
+      playlist: M3uPlaylist(epgUrl: pl.epgUrl, entries: const []),
+      channels: channels,
+      movies: movies,
+      series: series,
+    );
   }
 
   Future<String> _load(String location) async {
@@ -220,6 +246,13 @@ class M3uSource extends IptvSource {
     return (show: show.isEmpty ? name : show, season: int.parse(m.group(2)!), episode: int.parse(m.group(3)!));
   }
 }
+
+typedef _Built = ({
+  M3uPlaylist playlist,
+  List<Channel> channels,
+  List<Movie> movies,
+  Map<String, _SeriesBuilder> series,
+});
 
 class _SeriesBuilder {
   _SeriesBuilder(this.series);

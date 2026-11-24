@@ -80,7 +80,7 @@ class _HomeShellState extends State<HomeShell> {
         store.lastChannel(profileId) != null &&
         !_autoStarted) {
       _autoStarted = true;
-      _whenReady(() => openLiveFullscreen(context));
+      _whenReady(() => openLiveFullscreen(context, showList: true));
     }
   }
 
@@ -172,7 +172,7 @@ class _HomeShellState extends State<HomeShell> {
     if (_section != Section.search) _voiceSearch = false;
 
     if (!wide) {
-      return Focus(onKeyEvent: _onKey, child: _phone(page, sections));
+      return Focus(canRequestFocus: false, skipTraversal: true, onKeyEvent: _onKey, child: _phone(page, sections));
     }
     // Android's Back button pops the route; on a section it should go home instead.
     return PopScope(
@@ -180,7 +180,12 @@ class _HomeShellState extends State<HomeShell> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && !_home) _goHome();
       },
-      child: Focus(onKeyEvent: _onKey, child: _home ? _homeScreen(sections) : _wide(page, sections)),
+      child: Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        onKeyEvent: _onKey,
+        child: _home ? _homeScreen(sections) : _wide(page, sections),
+      ),
     );
   }
 
@@ -380,7 +385,7 @@ class SessionGate extends StatelessWidget {
       case SessionState.ready:
         return child;
       case SessionState.connecting:
-        return LoadingView(message: 'Connecting to ${store.activeProfile?.name ?? 'your playlist'}…');
+        return const LoadingView();
       case SessionState.error:
         return MessageView(
           icon: Icons.cloud_off_rounded,

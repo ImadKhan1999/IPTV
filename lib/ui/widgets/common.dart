@@ -305,24 +305,13 @@ class AppLogo extends StatelessWidget {
   }
 }
 
+/// Loading indicator: just the spinner, no text (clean, set-top box style).
 class LoadingView extends StatelessWidget {
-  const LoadingView({super.key, this.message});
-
-  final String? message;
+  const LoadingView({super.key});
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const SizedBox(width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3)),
-        if (message != null) ...[
-          const SizedBox(height: 16),
-          Text(message!, style: const TextStyle(color: Brand.textSecondary)),
-        ],
-      ],
-    ),
-  );
+  Widget build(BuildContext context) =>
+      const Center(child: SizedBox(width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3)));
 }
 
 class MessageView extends StatelessWidget {
@@ -567,4 +556,87 @@ class PaneKeys extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       Focus(canRequestFocus: false, skipTraversal: true, onKeyEvent: _onKey, child: child);
+}
+
+/// Makes sure a remote key press never goes nowhere. When nothing on screen holds focus
+/// (for example after the player closes, or when a screen was built behind another one),
+/// the first arrow or OK press puts focus on the top-left item of the screen in front,
+/// instead of being dropped.
+class FocusRescue extends StatefulWidget {
+  const FocusRescue({super.key, required this.child});
+
+  final Widget child;
+
+  /// The item a lost remote press lands on: the top-left focusable item of the front screen.
+  static FocusNode? target() {
+    final candidates = <(FocusNode, Rect)>[];
+    for (final n in FocusManager.instance.rootScope.traversalDescendants) {
+      final ctx = n.context;
+      if (n is FocusScopeNode || ctx == null || !ctx.mounted || !n.canRequestFocus) continue;
+      if (ctx.findAncestorWidgetOfExactType<EditableText>() != null) continue;
+      if (ctx.findAncestorWidgetOfExactType<TvTextKeys>() != null) continue;
+      if (ModalRoute.of(ctx)?.isCurrent == false) continue;
+      final box = ctx.findRenderObject();
+      if (box is! RenderBox || !box.attached || !box.hasSize || box.size.isEmpty) continue;
+      candidates.add((n, n.rect));
+    }
+    if (candidates.isEmpty) return null;
+    candidates.sort((a, b) {
+      final dy = a.$2.top.compareTo(b.$2.top);
+      return dy != 0 && (a.$2.top - b.$2.top).abs() > 8 ? dy : a.$2.left.compareTo(b.$2.left);
+    });
+    return candidates.first.$1;
+  }
+
+  /// True when no real item has focus (nothing, or only a screen/pane holder).
+  static bool get focusLost {
+    final p = FocusManager.instance.primaryFocus;
+    return p == null || p is FocusScopeNode;
+  }
+
+  /// Focuses [target] when focus is lost. Returns whether it did.
+  static bool rescue() {
+    if (!focusLost) return false;
+    final t = target();
+    t?.requestFocus();
+    return t != null;
+  }
+
+  @override
+  State<FocusRescue> createState() => _FocusRescueState();
+}
+
+class _FocusRescueState extends State<FocusRescue> {
+  static final _navKeys = {
+    LogicalKeyboardKey.arrowUp,
+    LogicalKeyboardKey.arrowDown,
+    LogicalKeyboardKey.arrowLeft,
+    LogicalKeyboardKey.arrowRight,
+    LogicalKeyboardKey.select,
+    LogicalKeyboardKey.enter,
+    LogicalKeyboardKey.numpadEnter,
+    LogicalKeyboardKey.gameButtonA,
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addEarlyKeyEventHandler(_onKey);
+  }
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeEarlyKeyEventHandler(_onKey);
+    super.dispose();
+  }
+
+  // Runs before the focused widget sees the key. A press that only brings focus back is
+  // used up, so it lands on the first item instead of also moving past it or opening it.
+  KeyEventResult _onKey(KeyEvent e) {
+    if (e is! KeyDownEvent || !_navKeys.contains(e.logicalKey)) return KeyEventResult.ignored;
+    return FocusRescue.rescue() ? KeyEventResult.handled : KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

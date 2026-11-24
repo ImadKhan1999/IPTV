@@ -45,6 +45,19 @@ class XtreamSource extends IptvSource {
   };
 
   Future<dynamic> _get(Map<String, String> params) async {
+    final bytes = await _bytes(params);
+    return IptvSource.offThread(_decode, bytes, bytes.length);
+  }
+
+  /// Downloads (or reads from the disk cache), decodes and turns the reply into app objects
+  /// in one go on a background thread. Big lists (tens of thousands of channels) never
+  /// freeze the screen this way.
+  Future<R> _getMapped<R>(Map<String, String> params, R Function(List<int>) work) async {
+    final bytes = await _bytes(params);
+    return IptvSource.offThread(work, bytes, bytes.length);
+  }
+
+  Future<List<int>> _bytes(Map<String, String> params) async {
     final uri = _api(params);
     Future<List<int>> load({bool validate = false}) async {
       final res = await client.get(uri, headers: defaultHeaders).timeout(const Duration(seconds: 30));
@@ -52,14 +65,16 @@ class XtreamSource extends IptvSource {
         throw SourceException('Login rejected: check the username and password.');
       }
       if (res.statusCode != 200) throw SourceException('Server error (HTTP ${res.statusCode}).');
-      if (validate) await IptvSource.offThread(_decode, res.bodyBytes, res.bodyBytes.length); // never store a broken reply
+      if (validate) {
+        // Never store a broken reply.
+        await IptvSource.offThread(_decode, res.bodyBytes, res.bodyBytes.length);
+      }
       return res.bodyBytes;
     }
 
-    final bytes = _cacheableActions.contains(params['action'])
-        ? await cachedBytes('xtream|$uri', () => load(validate: true))
-        : await load();
-    return IptvSource.offThread(_decode, bytes, bytes.length);
+    return _cacheableActions.contains(params['action'])
+        ? cachedBytes('xtream|$uri', () => load(validate: true))
+        : load();
   }
 
   static dynamic _decode(List<int> bytes) {
@@ -144,45 +159,54 @@ class XtreamSource extends IptvSource {
   Future<List<Channel>> channels(String categoryId) async =>
       _fromFullList<Channel>('live', categoryId, (c) => c.categoryId) ?? await _channels(categoryId);
 
-  Future<List<Channel>> _channels(String categoryId) => _cached('live:$categoryId', () async {
-    final list = jList(await _get({'action': 'get_live_streams', ..._catParam(categoryId)}));
-    return [
-      for (final s in list)
-        if (jStr(s['stream_id']) != null)
-          Channel(
-            id: jStr(s['stream_id'])!,
-            name: jStr(s['name']) ?? 'Channel',
-            number: jInt(s['num']),
-            logo: jStr(s['stream_icon']),
-            categoryId: jStr(s['category_id']) ?? '',
-            streamUrl: '$server/live/$_u/$_p/${jStr(s['stream_id'])}.$liveExtension',
-            epgId: jStr(s['epg_channel_id']),
-            catchupDays: jBool(s['tv_archive']) ? (jInt(s['tv_archive_duration']) ?? 0) : 0,
-          ),
-    ];
-  });
+  Future<List<Channel>> _channels(String categoryId) => _cached(
+    'live:$categoryId',
+    () => _getMapped({
+      'action': 'get_live_streams',
+      ..._catParam(categoryId),
+    }, _channelMapper('$server/live/$_u/$_p/', liveExtension)),
+  );
+
+  static List<Channel> Function(List<int>) _channelMapper(String prefix, String ext) =>
+      (bytes) => [
+        for (final s in jList(_decode(bytes)))
+          if (jStr(s['stream_id']) != null)
+            Channel(
+              id: jStr(s['stream_id'])!,
+              name: jStr(s['name']) ?? 'Channel',
+              number: jInt(s['num']),
+              logo: jStr(s['stream_icon']),
+              categoryId: jStr(s['category_id']) ?? '',
+              streamUrl: '$prefix${jStr(s['stream_id'])}.$ext',
+              epgId: jStr(s['epg_channel_id']),
+              catchupDays: jBool(s['tv_archive']) ? (jInt(s['tv_archive_duration']) ?? 0) : 0,
+            ),
+      ];
 
   @override
   Future<List<Movie>> movies(String categoryId) async =>
       _fromFullList<Movie>('vod', categoryId, (m) => m.categoryId) ?? await _movies(categoryId);
 
-  Future<List<Movie>> _movies(String categoryId) => _cached('vod:$categoryId', () async {
-    final list = jList(await _get({'action': 'get_vod_streams', ..._catParam(categoryId)}));
-    return [
-      for (final s in list)
-        if (jStr(s['stream_id']) != null)
-          Movie(
-            id: jStr(s['stream_id'])!,
-            name: jStr(s['name']) ?? 'Movie',
-            poster: jStr(s['stream_icon']),
-            categoryId: jStr(s['category_id']) ?? '',
-            rating: jDouble(s['rating']),
-            year: jStr(s['year']),
-            containerExt: jStr(s['container_extension']) ?? 'mp4',
-            streamUrl: '$server/movie/$_u/$_p/${jStr(s['stream_id'])}.${jStr(s['container_extension']) ?? 'mp4'}',
-          ),
-    ];
-  });
+  Future<List<Movie>> _movies(String categoryId) => _cached(
+    'vod:$categoryId',
+    () => _getMapped({'action': 'get_vod_streams', ..._catParam(categoryId)}, _movieMapper('$server/movie/$_u/$_p/')),
+  );
+
+  static List<Movie> Function(List<int>) _movieMapper(String prefix) =>
+      (bytes) => [
+        for (final s in jList(_decode(bytes)))
+          if (jStr(s['stream_id']) != null)
+            Movie(
+              id: jStr(s['stream_id'])!,
+              name: jStr(s['name']) ?? 'Movie',
+              poster: jStr(s['stream_icon']),
+              categoryId: jStr(s['category_id']) ?? '',
+              rating: jDouble(s['rating']),
+              year: jStr(s['year']),
+              containerExt: jStr(s['container_extension']) ?? 'mp4',
+              streamUrl: '$prefix${jStr(s['stream_id'])}.${jStr(s['container_extension']) ?? 'mp4'}',
+            ),
+      ];
 
   /// Full movie details (plot, cast, trailer...).
   Future<Map<String, dynamic>> movieInfo(Movie movie) async =>
@@ -192,22 +216,22 @@ class XtreamSource extends IptvSource {
   Future<List<Series>> series(String categoryId) async =>
       _fromFullList<Series>('series', categoryId, (s) => s.categoryId) ?? await _series(categoryId);
 
-  Future<List<Series>> _series(String categoryId) => _cached('series:$categoryId', () async {
-    final list = jList(await _get({'action': 'get_series', ..._catParam(categoryId)}));
-    return [
-      for (final s in list)
-        if (jStr(s['series_id']) != null)
-          Series(
-            id: jStr(s['series_id'])!,
-            name: jStr(s['name']) ?? 'Series',
-            poster: jStr(s['cover']),
-            categoryId: jStr(s['category_id']) ?? '',
-            rating: jDouble(s['rating']),
-            plot: jStr(s['plot']),
-            year: jStr(s['releaseDate'])?.split('-').first,
-          ),
-    ];
-  });
+  Future<List<Series>> _series(String categoryId) =>
+      _cached('series:$categoryId', () => _getMapped({'action': 'get_series', ..._catParam(categoryId)}, _mapSeries));
+
+  static List<Series> _mapSeries(List<int> bytes) => [
+    for (final s in jList(_decode(bytes)))
+      if (jStr(s['series_id']) != null)
+        Series(
+          id: jStr(s['series_id'])!,
+          name: jStr(s['name']) ?? 'Series',
+          poster: jStr(s['cover']),
+          categoryId: jStr(s['category_id']) ?? '',
+          rating: jDouble(s['rating']),
+          plot: jStr(s['plot']),
+          year: jStr(s['releaseDate'])?.split('-').first,
+        ),
+  ];
 
   @override
   Future<SeriesDetails> seriesDetails(Series series) async {

@@ -848,7 +848,7 @@ class PlayerVideo extends StatelessWidget {
   );
 }
 
-/// Start-up progress ("Connecting…", "Buffering 42%", "Reconnecting 2/4") and readable errors.
+/// Start-up spinner (fills while buffering, amber while reconnecting) and readable errors.
 class PlayerStatusOverlay extends StatelessWidget {
   const PlayerStatusOverlay({super.key, required this.controller, this.compact = false, this.onNextChannel});
 
@@ -864,67 +864,19 @@ class PlayerStatusOverlay extends StatelessWidget {
         final c = controller;
         if (c.stage == PlayStage.playing) return const SizedBox.shrink();
         if (c.stage == PlayStage.error) return _error(context, c);
+        // Just the animation while it starts: no status text. The ring fills while buffering.
         final pct = c.stage == PlayStage.buffering && c.bufferPercent > 0 ? c.bufferPercent / 100 : null;
-        final size = compact ? 40.0 : 64.0;
-        final steps = [PlayStage.resolving, PlayStage.connecting, PlayStage.buffering];
-        final stepIndex = steps.indexOf(c.stage);
+        final size = compact ? 40.0 : 56.0;
         return Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: size,
-                height: size,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    CircularProgressIndicator(
-                      value: pct,
-                      strokeWidth: compact ? 3 : 4,
-                      backgroundColor: Colors.white12,
-                      color: c.stage == PlayStage.reconnecting ? Brand.warning : Brand.cyberMint,
-                    ),
-                    if (pct != null)
-                      Center(
-                        child: Text(
-                          '${c.bufferPercent.round()}%',
-                          style: TextStyle(fontSize: compact ? 11 : 15, fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              SizedBox(height: compact ? 10 : 16),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)),
-                child: Text(
-                  c.statusText,
-                  style: TextStyle(fontSize: compact ? 12 : 15, fontWeight: FontWeight.w600),
-                ),
-              ),
-              if (!compact && stepIndex >= 0) ...[
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final (i, label) in const ['Link', 'Server', 'Buffer'].indexed) ...[
-                      if (i > 0) const SizedBox(width: 6),
-                      Icon(
-                        i < stepIndex ? Icons.check_circle_rounded : Icons.circle_outlined,
-                        size: 14,
-                        color: i <= stepIndex ? Brand.cyberMint : Brand.textMuted,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        label,
-                        style: TextStyle(fontSize: 12, color: i <= stepIndex ? Brand.textPrimary : Brand.textMuted),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ],
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: CircularProgressIndicator(
+              value: pct,
+              strokeWidth: compact ? 3 : 4,
+              backgroundColor: Colors.white12,
+              color: c.stage == PlayStage.reconnecting ? Brand.warning : Brand.cyberMint,
+            ),
           ),
         );
       },

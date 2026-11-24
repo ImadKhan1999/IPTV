@@ -140,6 +140,27 @@ class _LiveOverlayState extends State<LiveOverlay> {
       if (_categoryId != Category.allId && _categoryId != _favoritesId && !cats.any((c) => c.id == _categoryId)) {
         setState(() => _categoryId = Category.allId);
       }
+      // Show the playing channel's category in the list (it can be far down).
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_catScroll.hasClients) return;
+        final store = context.read<LibraryStore>();
+        final profileId = session.profile!.id;
+        final ids = [
+          Category.allId,
+          _favoritesId,
+          for (final c in store.favoriteCategoriesFirst(
+            profileId,
+            ContentType.live,
+            Parental.visible(store, profileId, cats),
+          ))
+            c.id,
+        ];
+        final i = ids.indexOf(_categoryId);
+        if (i > 2) {
+          final at = (i * 46.0 - 120).clamp(0.0, _catScroll.position.maxScrollExtent);
+          _catScroll.jumpTo(at);
+        }
+      });
     } catch (_) {}
   }
 
@@ -232,7 +253,7 @@ class _LiveOverlayState extends State<LiveOverlay> {
   @override
   Widget build(BuildContext context) {
     final store = context.watch<LibraryStore>();
-    final session = context.read<Session>();
+    final session = context.watch<Session>(); // counts arrive after connecting
     final profileId = session.profile!.id;
     final counts = session.counts[ContentType.live];
     final cats = _categories;

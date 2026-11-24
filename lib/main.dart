@@ -10,6 +10,7 @@ import 'ui/platform.dart';
 import 'ui/screens/home_shell.dart';
 import 'ui/screens/welcome_screen.dart';
 import 'ui/theme.dart';
+import 'ui/widgets/common.dart';
 import 'ui/widgets/update_dialog.dart';
 
 Future<void> main() async {
@@ -59,8 +60,9 @@ class IptvApp extends StatelessWidget {
           const SingleActivator(LogicalKeyboardKey.numpadEnter): const ActivateIntent(),
         },
         navigatorKey: _navigatorKey,
-        builder: (context, child) =>
-            checkUpdates ? UpdateWatcher(navigatorKey: _navigatorKey, child: child!) : child!,
+        builder: (context, child) => FocusRescue(
+          child: checkUpdates ? UpdateWatcher(navigatorKey: _navigatorKey, child: child!) : child!,
+        ),
         home: const RootGate(),
       ),
     );

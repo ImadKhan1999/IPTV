@@ -33,7 +33,7 @@ class HomeTile {
 
 /// Big-tile home screen for TV and desktop: Live TV, Movies and Series up front,
 /// then Favorites, Search, Settings. Built to be driven with a D-pad from across the room.
-class TvHome extends StatelessWidget {
+class TvHome extends StatefulWidget {
   const TvHome({super.key, required this.tiles, required this.onOpen, this.focusId});
 
   final List<HomeTile> tiles;
@@ -43,7 +43,35 @@ class TvHome extends StatelessWidget {
   final Object? focusId;
 
   @override
+  State<TvHome> createState() => _TvHomeState();
+}
+
+class _TvHomeState extends State<TvHome> {
+  final _focusTile = FocusNode(debugLabel: 'home tile');
+
+  @override
+  void dispose() {
+    _focusTile.dispose();
+    super.dispose();
+  }
+
+  /// Autofocus is skipped when Home is built behind another screen (the player opening at
+  /// start-up). Whenever Home is in front and nothing has focus, give it to the tile,
+  /// so the remote works straight away without a mouse.
+  void _ensureFocus() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || ModalRoute.of(context)?.isCurrent == false) return;
+      if (FocusRescue.focusLost && _focusTile.context != null) _focusTile.requestFocus();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final tiles = widget.tiles;
+    final onOpen = widget.onOpen;
+    final focusId = widget.focusId;
+    // Depending on the route rebuilds this when the player on top closes.
+    if (ModalRoute.of(context)?.isCurrent != false) _ensureFocus();
     final store = context.watch<LibraryStore>();
     final session = context.watch<Session>();
     final size = MediaQuery.sizeOf(context);
@@ -137,7 +165,13 @@ class TvHome extends StatelessWidget {
                           if (i > 0) const SizedBox(width: 18),
                           Expanded(
                             flex: i == 0 ? 5 : 4,
-                            child: _Tile(tile: t, autofocus: t.id == focus, onOpen: onOpen, large: true),
+                            child: _Tile(
+                              tile: t,
+                              autofocus: t.id == focus,
+                              focusNode: t.id == focus ? _focusTile : null,
+                              onOpen: onOpen,
+                              large: true,
+                            ),
                           ),
                         ],
                       ],
@@ -152,7 +186,12 @@ class TvHome extends StatelessWidget {
                         for (final (i, t) in small.indexed) ...[
                           if (i > 0) const SizedBox(width: 18),
                           Expanded(
-                            child: _Tile(tile: t, autofocus: t.id == focus, onOpen: onOpen),
+                            child: _Tile(
+                              tile: t,
+                              autofocus: t.id == focus,
+                              focusNode: t.id == focus ? _focusTile : null,
+                              onOpen: onOpen,
+                            ),
                           ),
                         ],
                       ],
@@ -185,9 +224,10 @@ const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 
 const _days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 class _Tile extends StatelessWidget {
-  const _Tile({required this.tile, required this.onOpen, this.autofocus = false, this.large = false});
+  const _Tile({required this.tile, required this.onOpen, this.autofocus = false, this.focusNode, this.large = false});
 
   final HomeTile tile;
+  final FocusNode? focusNode;
   final ValueChanged<Object> onOpen;
   final bool autofocus;
   final bool large;
@@ -197,6 +237,7 @@ class _Tile extends StatelessWidget {
     final t = tile;
     return TvFocusable(
       autofocus: autofocus,
+      focusNode: focusNode,
       borderRadius: 20,
       scale: 1.04,
       onSelect: () => onOpen(t.id),
