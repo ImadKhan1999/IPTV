@@ -112,11 +112,18 @@ class M3uSource extends IptvSource {
 
   Future<String> _load(String location) async {
     if (location.startsWith('http://') || location.startsWith('https://')) {
-      final res = await client.get(Uri.parse(location), headers: defaultHeaders);
-      if (res.statusCode != 200) {
-        throw SourceException('Could not download the playlist (HTTP ${res.statusCode}).');
-      }
-      return utf8.decode(res.bodyBytes, allowMalformed: true);
+      final bytes = await cachedBytes('m3u|$location', () async {
+        final res = await client.get(Uri.parse(location), headers: defaultHeaders);
+        if (res.statusCode != 200) {
+          throw SourceException('Could not download the playlist (HTTP ${res.statusCode}).');
+        }
+        final text = utf8.decode(res.bodyBytes, allowMalformed: true);
+        if (!text.contains('#EXTINF') && !text.contains('://')) {
+          throw SourceException('This does not look like an M3U playlist.');
+        }
+        return res.bodyBytes;
+      });
+      return utf8.decode(bytes, allowMalformed: true);
     }
     final f = File(location.startsWith('file://') ? Uri.parse(location).toFilePath() : location);
     if (!await f.exists()) throw SourceException('Playlist file not found.');

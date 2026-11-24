@@ -66,12 +66,29 @@ class StalkerSource extends IptvSource {
 
   static String get _timezone => 'Europe/London';
 
+  /// List replies kept on disk between launches. Handshake, profile and links are always live.
+  static const _cacheableActions = {'get_genres', 'get_categories', 'get_all_channels', 'get_ordered_list'};
+
   Future<dynamic> _call(Map<String, String> params, {String? endpoint}) async {
     final url = endpoint ?? _endpoint!;
     final uri = Uri.parse(url).replace(queryParameters: {...params, 'JsHttpRequest': '1-xml'});
-    final res = await client.get(uri, headers: _headers).timeout(const Duration(seconds: 25));
-    if (res.statusCode != 200) throw SourceException('Portal error (HTTP ${res.statusCode}).');
-    final body = utf8.decode(res.bodyBytes, allowMalformed: true).trim();
+    Future<List<int>> load({bool validate = false}) async {
+      final res = await client.get(uri, headers: _headers).timeout(const Duration(seconds: 25));
+      if (res.statusCode != 200) throw SourceException('Portal error (HTTP ${res.statusCode}).');
+      if (validate) _decode(res.bodyBytes); // never store a rejected or broken reply
+      return res.bodyBytes;
+    }
+
+    if (_cacheableActions.contains(params['action'])) {
+      // The token changes every session, so the key is the portal, the MAC and the request.
+      final key = 'stalker|$url|$mac|${(params.entries.toList()..sort((a, b) => a.key.compareTo(b.key))).join('&')}';
+      return _decode(await cachedBytes(key, () => load(validate: true)));
+    }
+    return _decode(await load());
+  }
+
+  static dynamic _decode(List<int> bytes) {
+    final body = utf8.decode(bytes, allowMalformed: true).trim();
     if (body.isEmpty || body.toLowerCase().contains('authorization failed')) {
       throw SourceException('The portal rejected this MAC address.');
     }

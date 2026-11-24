@@ -172,6 +172,7 @@ class PlayerSettings {
     this.autoPlayNextEpisode = true,
     this.rememberPosition = true,
     this.liveFormat = 'ts',
+    this.refreshHours = 24,
   });
 
   final bool hardwareDecoding;
@@ -180,18 +181,24 @@ class PlayerSettings {
   final bool rememberPosition;
   final String liveFormat;
 
+  /// How long downloaded playlists and guides are used before the app checks the provider
+  /// again (in the background). 0 means check on every launch.
+  final int refreshHours;
+
   PlayerSettings copyWith({
     bool? hardwareDecoding,
     int? bufferSeconds,
     bool? autoPlayNextEpisode,
     bool? rememberPosition,
     String? liveFormat,
+    int? refreshHours,
   }) => PlayerSettings(
     hardwareDecoding: hardwareDecoding ?? this.hardwareDecoding,
     bufferSeconds: bufferSeconds ?? this.bufferSeconds,
     autoPlayNextEpisode: autoPlayNextEpisode ?? this.autoPlayNextEpisode,
     rememberPosition: rememberPosition ?? this.rememberPosition,
     liveFormat: liveFormat ?? this.liveFormat,
+    refreshHours: refreshHours ?? this.refreshHours,
   );
 
   Map<String, dynamic> toJson() => {
@@ -200,6 +207,7 @@ class PlayerSettings {
     'autoPlayNextEpisode': autoPlayNextEpisode,
     'rememberPosition': rememberPosition,
     'liveFormat': liveFormat,
+    'refreshHours': refreshHours,
   };
 
   factory PlayerSettings.fromJson(Map<String, dynamic> j) => PlayerSettings(
@@ -208,6 +216,7 @@ class PlayerSettings {
     autoPlayNextEpisode: j['autoPlayNextEpisode'] as bool? ?? true,
     rememberPosition: j['rememberPosition'] as bool? ?? true,
     liveFormat: j['liveFormat'] as String? ?? 'ts',
+    refreshHours: j['refreshHours'] as int? ?? 24,
   );
 }
 

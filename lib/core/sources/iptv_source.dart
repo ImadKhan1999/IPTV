@@ -1,5 +1,6 @@
 import 'package:http/http.dart' as http;
 
+import '../../data/disk_cache.dart';
 import '../models.dart';
 import 'm3u_source.dart';
 import 'stalker_source.dart';
@@ -14,6 +15,13 @@ abstract class IptvSource {
 
   final PlaylistProfile profile;
   final http.Client client;
+
+  /// Disk cache for list replies, set by the session. Null means always use the network.
+  CachePolicy? cachePolicy;
+
+  /// Runs [load] through the disk cache when one is set.
+  Future<List<int>> cachedBytes(String key, Future<List<int>> Function() load) =>
+      cachePolicy == null ? load() : cachePolicy!.fetch(key, load);
 
   Set<SourceFeature> get features;
 

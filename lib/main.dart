@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 
+import 'data/disk_cache.dart';
 import 'data/library_store.dart';
 import 'state/session.dart';
 import 'ui/platform.dart';
@@ -15,20 +16,22 @@ Future<void> main() async {
   MediaKit.ensureInitialized();
   await AppPlatform.init();
   final store = await LibraryStore.open();
-  runApp(IptvApp(store: store));
+  final cache = await DiskCache.open();
+  runApp(IptvApp(store: store, cache: cache));
 }
 
 class IptvApp extends StatelessWidget {
-  const IptvApp({super.key, required this.store});
+  const IptvApp({super.key, required this.store, this.cache});
 
   final LibraryStore store;
+  final DiskCache? cache;
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: store),
-        ChangeNotifierProvider(create: (_) => Session(store)),
+        ChangeNotifierProvider(create: (_) => Session(store, cache: cache)),
       ],
       child: MaterialApp(
         title: 'iPTV by ImadLabs',

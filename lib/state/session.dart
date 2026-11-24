@@ -8,15 +8,22 @@ import '../core/sources/iptv_source.dart';
 import '../core/sources/m3u_source.dart';
 import '../core/sources/stalker_source.dart';
 import '../core/sources/xtream_source.dart';
+import '../data/disk_cache.dart';
 import '../data/library_store.dart';
 
 enum SessionState { idle, connecting, ready, error }
 
 /// The live connection to the active playlist, plus guide data and caches.
 class Session extends ChangeNotifier {
-  Session(this.store);
+  Session(this.store, {DiskCache? cache}) : cache = cache ?? DiskCache.memory();
 
   final LibraryStore store;
+
+  /// Playlists, lists and guides saved between launches so the app opens instantly.
+  final DiskCache cache;
+
+  /// When the cached lists for the current playlist were downloaded.
+  DateTime? cachedAt;
 
   IptvSource? source;
   AccountInfo? account;
@@ -36,15 +43,29 @@ class Session extends ChangeNotifier {
 
   PlaylistProfile? get profile => source?.profile;
 
-  Future<bool> connect(PlaylistProfile p) async {
+  /// Connects to [p]. Lists come from the disk cache when it has them; [refresh] downloads
+  /// everything again (Settings > Refresh playlist).
+  Future<bool> connect(PlaylistProfile p, {bool refresh = false}) async {
     disconnect();
     state = SessionState.connecting;
     error = null;
     notifyListeners();
     final s = IptvSource.create(p);
     if (s is XtreamSource) s.liveExtension = store.player.liveFormat;
+    s.cachePolicy = CachePolicy(
+      cache: cache,
+      group: p.id,
+      maxAge: Duration(hours: store.player.refreshHours),
+      forceRefresh: refresh,
+    );
     try {
       account = await s.connect();
+      unawaited(
+        cache.updatedAt(p.id).then((t) {
+          cachedAt = t;
+          notifyListeners();
+        }),
+      );
       source = s;
       state = SessionState.ready;
       await store.setActiveProfile(p.id);
@@ -71,6 +92,7 @@ class Session extends ChangeNotifier {
     source = null;
     account = null;
     guide = EpgGuide.empty;
+    cachedAt = null;
     counts.clear();
     _epgCache.clear();
     state = SessionState.idle;
@@ -87,7 +109,10 @@ class Session extends ChangeNotifier {
     guideLoading = true;
     notifyListeners();
     try {
-      final g = await EpgGuide.download(url, headers: s.defaultHeaders);
+      final bytes = await s.cachedBytes('epg|$url', () => EpgGuide.fetchBytes(url, headers: s.defaultHeaders));
+      if (source != s) return;
+      // Big guides take a moment to parse; keep the UI smooth by doing it off the main thread.
+      final g = kIsWeb ? EpgGuide.fromBytes(bytes) : await compute(EpgGuide.fromBytes, bytes);
       if (source != s) return;
       guide = g;
       if (s is M3uSource) s.guide = g;

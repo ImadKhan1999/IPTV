@@ -32,14 +32,38 @@ class XtreamSource extends IptvSource {
       Uri.parse('$server/player_api.php')
           .replace(queryParameters: {'username': profile.username, 'password': profile.password, ...params});
 
+  /// List replies that are kept on disk between launches. Login and EPG are always live.
+  static const _cacheableActions = {
+    'get_live_categories',
+    'get_vod_categories',
+    'get_series_categories',
+    'get_live_streams',
+    'get_vod_streams',
+    'get_series',
+    'get_series_info',
+    'get_vod_info',
+  };
+
   Future<dynamic> _get(Map<String, String> params) async {
     final uri = _api(params);
-    final res = await client.get(uri, headers: defaultHeaders).timeout(const Duration(seconds: 30));
-    if (res.statusCode == 401 || res.statusCode == 403) {
-      throw SourceException('Login rejected: check the username and password.');
+    Future<List<int>> load({bool validate = false}) async {
+      final res = await client.get(uri, headers: defaultHeaders).timeout(const Duration(seconds: 30));
+      if (res.statusCode == 401 || res.statusCode == 403) {
+        throw SourceException('Login rejected: check the username and password.');
+      }
+      if (res.statusCode != 200) throw SourceException('Server error (HTTP ${res.statusCode}).');
+      if (validate) _decode(res.bodyBytes); // never store a broken reply
+      return res.bodyBytes;
     }
-    if (res.statusCode != 200) throw SourceException('Server error (HTTP ${res.statusCode}).');
-    final body = utf8.decode(res.bodyBytes, allowMalformed: true).trim();
+
+    final bytes = _cacheableActions.contains(params['action'])
+        ? await cachedBytes('xtream|$uri', () => load(validate: true))
+        : await load();
+    return _decode(bytes);
+  }
+
+  static dynamic _decode(List<int> bytes) {
+    final body = utf8.decode(bytes, allowMalformed: true).trim();
     if (body.isEmpty) return const [];
     try {
       return jsonDecode(body);

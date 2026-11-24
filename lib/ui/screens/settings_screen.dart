@@ -73,6 +73,7 @@ class SettingsScreen extends StatelessWidget {
                       if (yes != true) return;
                       final wasActive = p.id == store.activeProfile?.id;
                       await store.removeProfile(p.id);
+                      await session.cache.clearGroup(p.id);
                       if (wasActive) {
                         session.disconnect();
                         final next = store.activeProfile;
@@ -115,12 +116,55 @@ class SettingsScreen extends StatelessWidget {
           ),
         ],
 
-        // TV guide ---------------------------------------------------------------
-        const _Section('TV guide'),
+        // Playlist data ----------------------------------------------------------
+        const _Section('Playlist data'),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.sync_rounded),
+          title: const Text('Refresh playlist now'),
+          subtitle: Text(
+            session.state == SessionState.connecting
+                ? 'Downloading channels, movies, series and TV guide…'
+                : [
+                    if (session.cachedAt != null) 'Saved on this device ${_ago(session.cachedAt!)}',
+                    'Opens instantly from the saved copy. Refresh to get new channels now.',
+                  ].join('. '),
+          ),
+          onTap: session.state == SessionState.connecting
+              ? null
+              : () async {
+                  final p = store.activeProfile;
+                  if (p == null) return;
+                  final ok = await session.connect(p, refresh: true);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(ok ? 'Playlist refreshed' : 'Refresh failed: ${session.error}')),
+                    );
+                  }
+                },
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.update_rounded),
+          title: const Text('Check for playlist changes'),
+          subtitle: const Text('The saved copy is used right away and updated in the background after this time.'),
+          trailing: DropdownButton<int>(
+            value: const [0, 6, 12, 24, 72, 168].contains(store.player.refreshHours) ? store.player.refreshHours : 24,
+            items: const [
+              DropdownMenuItem(value: 0, child: Text('Every launch')),
+              DropdownMenuItem(value: 6, child: Text('Every 6 hours')),
+              DropdownMenuItem(value: 12, child: Text('Every 12 hours')),
+              DropdownMenuItem(value: 24, child: Text('Daily')),
+              DropdownMenuItem(value: 72, child: Text('Every 3 days')),
+              DropdownMenuItem(value: 168, child: Text('Weekly')),
+            ],
+            onChanged: (v) => store.updatePlayer(store.player.copyWith(refreshHours: v)),
+          ),
+        ),
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.event_note_rounded),
-          title: const Text('Reload TV guide'),
+          title: const Text('TV guide'),
           subtitle: Text(
             session.guideLoading
                 ? 'Loading…'
@@ -128,7 +172,6 @@ class SettingsScreen extends StatelessWidget {
                 ? 'Uses your provider\'s guide, or the EPG URL set on the playlist.'
                 : '${session.guide.channelCount} channels with guide data',
           ),
-          onTap: session.guideLoading ? null : session.reloadGuide,
         ),
 
         // Player -----------------------------------------------------------------
@@ -347,4 +390,12 @@ class _LockedCategoriesScreenState extends State<_LockedCategoriesScreen> {
       ),
     );
   }
+}
+
+String _ago(DateTime t) {
+  final d = DateTime.now().difference(t);
+  if (d.inMinutes < 1) return 'just now';
+  if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+  if (d.inHours < 24) return '${d.inHours} h ago';
+  return '${d.inDays} ${d.inDays == 1 ? 'day' : 'days'} ago';
 }

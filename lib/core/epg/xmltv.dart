@@ -40,12 +40,27 @@ class EpgGuide {
     try {
       final res = await c.get(Uri.parse(url), headers: headers);
       if (res.statusCode != 200) throw SourceException('Guide download failed (HTTP ${res.statusCode})');
-      List<int> bytes = res.bodyBytes;
-      if (bytes.length > 2 && bytes[0] == 0x1f && bytes[1] == 0x8b) bytes = gzip.decode(bytes);
-      return parse(utf8.decode(bytes, allowMalformed: true));
+      return fromBytes(res.bodyBytes);
     } finally {
       if (client == null) c.close();
     }
+  }
+
+  /// Raw guide bytes as downloaded (gzip or plain XML).
+  static Future<List<int>> fetchBytes(String url, {http.Client? client, Map<String, String> headers = const {}}) async {
+    final c = client ?? http.Client();
+    try {
+      final res = await c.get(Uri.parse(url), headers: headers);
+      if (res.statusCode != 200) throw SourceException('Guide download failed (HTTP ${res.statusCode})');
+      return res.bodyBytes;
+    } finally {
+      if (client == null) c.close();
+    }
+  }
+
+  static EpgGuide fromBytes(List<int> bytes) {
+    if (bytes.length > 2 && bytes[0] == 0x1f && bytes[1] == 0x8b) bytes = gzip.decode(bytes);
+    return parse(utf8.decode(bytes, allowMalformed: true));
   }
 
   /// Streams through the XML so large guides do not build a full DOM.
