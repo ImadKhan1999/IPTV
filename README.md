@@ -12,6 +12,9 @@ iPTV plays the playlist from your own provider. It ships with no channels or con
 ## Features
 
 - **Every common IPTV login**: M3U / M3U8 playlists (URL or file), **Xtream Codes** (username + password) and **Stalker / Ministra portals** (MAC address, plus serial number, device ID 1 and 2, signature and STB model for portals locked to a box).
+- **Add a playlist without typing**: the TV shows a QR code. Scan it with your phone, paste the link (or Xtream login, Stalker portal, or pick an .m3u file) and tap Send; the TV connects by itself. Works over your Wi-Fi with no account. There's also **Paste link**, and full Xtream links (`get.php?username=…&password=…`) are split into server, user and password automatically.
+- **Copy playlists to another TV**: Settings → *Send playlists to another device* finds other iPTV devices on the same Wi-Fi that have the QR screen open and sends all playlists in one press; the other device starts on the same playlist.
+- **Typing with the remote**: OK opens the on-screen keyboard in any text box and up/down move on to the next control.
 - **Live TV** with categories, channel numbers, logos, a filter box, and a now / next **TV guide** panel (XMLTV, gzip supported, or the provider's own EPG). Picking a channel plays it in a **preview beside the channel list**; pick it again or press full screen to go big, without restarting the stream.
 - **Counts everywhere**: how many channels, movies and series the playlist has, and how many are in each category.
 - **Movies and Series** with posters, ratings, plots, seasons and episodes, **resume where you left off**, and auto-play of the next episode.
@@ -21,7 +24,7 @@ iPTV plays the playlist from your own provider. It ships with no channels or con
 - **Start with the last channel**: the app opens straight into what you watched last, playing (can be turned off).
 - **Your own channel groups** ("Sports", "News"…) in your own order, reorderable favorites, and **hidden channels**. Long-press a channel (or right-click) for the menu.
 - **Opens instantly**: playlists, lists and the TV guide are saved on the device and refreshed in the background on a schedule you choose; works offline from the saved copy.
-- **In-app updates**: checks GitHub releases once a day and installs the new version in one tap (the right APK for your device on Android, the installer on Windows).
+- **In-app updates**: checks GitHub releases every time the app opens and again every 30-90 minutes while it runs (also during playback), and installs the new version in one tap (the right APK for your device on Android, the installer on Windows).
 - **Several playlists**, switch between them in Settings.
 - **Parental control**: 4-digit PIN, lock any category, adult categories hidden or PIN-locked automatically.
 - **Player** built on libmpv (media_kit) with hardware decoding, big buffers and auto-reconnect for live streams. Centered play controls, **sound and brightness** controls (swipe on phones, mouse wheel on Windows), audio and subtitle track selection, aspect modes, picture-in-picture on Android phones, and full screen on Windows.

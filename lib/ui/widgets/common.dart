@@ -392,17 +392,47 @@ Future<String?> askText(BuildContext context, {required String title, String? hi
     context: context,
     builder: (ctx) => AlertDialog(
       title: Text(title),
-      content: TextField(
-        controller: c,
-        autofocus: true,
-        textInputAction: TextInputAction.done,
-        decoration: InputDecoration(hintText: hint),
-        onSubmitted: (v) => Navigator.pop(ctx, v),
+      content: TvTextKeys(
+        child: TextField(
+          controller: c,
+          autofocus: true,
+          textInputAction: TextInputAction.done,
+          decoration: InputDecoration(hintText: hint),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
         FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('Save')),
       ],
+    ),
+  );
+}
+
+class _ShowKeyboardIntent extends Intent {
+  const _ShowKeyboardIntent();
+}
+
+/// Makes a text box usable with a TV remote: OK opens the on-screen keyboard, and
+/// up/down move to the next control instead of getting stuck inside the box.
+class TvTextKeys extends StatelessWidget {
+  const TvTextKeys({super.key, required this.child});
+
+  final Widget child;
+
+  static void showKeyboard() => SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+
+  @override
+  Widget build(BuildContext context) => Shortcuts(
+    shortcuts: const {
+      SingleActivator(LogicalKeyboardKey.select): _ShowKeyboardIntent(),
+      SingleActivator(LogicalKeyboardKey.gameButtonA): _ShowKeyboardIntent(),
+      SingleActivator(LogicalKeyboardKey.arrowUp): DirectionalFocusIntent(TraversalDirection.up),
+      SingleActivator(LogicalKeyboardKey.arrowDown): DirectionalFocusIntent(TraversalDirection.down),
+    },
+    child: Actions(
+      actions: {_ShowKeyboardIntent: CallbackAction<_ShowKeyboardIntent>(onInvoke: (_) => showKeyboard())},
+      child: child,
     ),
   );
 }

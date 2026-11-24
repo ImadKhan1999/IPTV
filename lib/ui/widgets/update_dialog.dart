@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
@@ -8,19 +10,15 @@ import '../../data/updater.dart';
 import '../platform.dart';
 import '../theme.dart';
 
-/// Looks for a new version. With [quiet] (app start) nothing is shown unless one exists,
-/// and GitHub is asked at most once a day.
-Future<void> checkForUpdates(BuildContext context, {bool quiet = false}) async {
+/// Looks for a new version. With [quiet] (automatic checks) nothing is shown unless one exists.
+/// Returns true when an update dialog was shown.
+Future<bool> checkForUpdates(BuildContext context, {bool quiet = false, String? skipVersion}) async {
   final store = context.read<LibraryStore>();
   if (!AppPlatform.isAndroid && !Platform.isWindows) {
     if (!quiet) _snack(context, 'Updates for this platform come from the GitHub releases page.');
-    return;
+    return false;
   }
-  if (quiet) {
-    if (AppVersion.name.endsWith('-dev')) return; // local builds
-    final last = store.lastUpdateCheck;
-    if (last != null && DateTime.now().difference(last) < const Duration(hours: 20)) return;
-  }
+  if (quiet && AppVersion.name.endsWith('-dev')) return false; // local builds
   UpdateInfo? info;
   try {
     info = await Updater().check(
@@ -31,17 +29,98 @@ Future<void> checkForUpdates(BuildContext context, {bool quiet = false}) async {
     await store.markUpdateCheck();
   } catch (e) {
     if (!quiet && context.mounted) _snack(context, 'Could not check for updates. Check your internet connection.');
-    return;
+    return false;
   }
-  if (!context.mounted) return;
+  if (!context.mounted) return false;
   if (info == null) {
     if (!quiet) _snack(context, 'You have the latest version (${AppVersion.label}).');
-    return;
+    return false;
   }
+  if (quiet && info.version == skipVersion) return false;
   await showDialog<void>(
     context: context,
     builder: (_) => UpdateDialog(info: info!),
   );
+  UpdateWatcher.lastOffered = info.version;
+  return true;
+}
+
+/// Checks for updates by itself: every time the app is opened or brought back,
+/// and again at random moments (every 30-90 minutes) while it runs, even during playback.
+///
+/// If the person taps "Later", the same version isn't offered again by the random checks
+/// for a few hours; opening the app again always offers it.
+class UpdateWatcher extends StatefulWidget {
+  const UpdateWatcher({super.key, required this.navigatorKey, required this.child});
+
+  final GlobalKey<NavigatorState> navigatorKey;
+  final Widget child;
+
+  /// The version the last dialog offered.
+  static String? lastOffered;
+
+  @override
+  State<UpdateWatcher> createState() => _UpdateWatcherState();
+}
+
+class _UpdateWatcherState extends State<UpdateWatcher> with WidgetsBindingObserver {
+  final _random = Random();
+  Timer? _timer;
+  bool _checking = false;
+  DateTime? _lastCheck;
+  DateTime? _laterAt;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _timer = Timer(const Duration(seconds: 4), () => _check(opened: true));
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    // Opening the app from the TV home screen resumes it: check again unless we just did.
+    final last = _lastCheck;
+    if (last == null || DateTime.now().difference(last) > const Duration(minutes: 2)) {
+      _schedule(const Duration(seconds: 3), opened: true);
+    }
+  }
+
+  void _schedule(Duration after, {bool opened = false}) {
+    _timer?.cancel();
+    _timer = Timer(after, () => _check(opened: opened));
+  }
+
+  Future<void> _check({bool opened = false}) async {
+    if (_checking) return;
+    final ctx = widget.navigatorKey.currentContext;
+    if (ctx == null || !ctx.mounted) {
+      _schedule(const Duration(seconds: 10), opened: opened);
+      return;
+    }
+    _checking = true;
+    _lastCheck = DateTime.now();
+    try {
+      final snoozed = !opened && _laterAt != null && DateTime.now().difference(_laterAt!) < const Duration(hours: 3);
+      final shown = await checkForUpdates(ctx, quiet: true, skipVersion: snoozed ? UpdateWatcher.lastOffered : null);
+      // Still here after the dialog closed means "Later" (installing closes or replaces the app).
+      if (shown) _laterAt = DateTime.now();
+    } finally {
+      _checking = false;
+      _schedule(Duration(minutes: 30 + _random.nextInt(61)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 void _snack(BuildContext context, String text) =>

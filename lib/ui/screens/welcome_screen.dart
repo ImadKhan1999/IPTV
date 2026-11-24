@@ -1,27 +1,40 @@
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/models.dart';
+import '../../core/playlist_link.dart';
 import '../../data/library_store.dart';
+import '../../data/pairing_server.dart';
 import '../../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/pair_card.dart';
 
 /// First-run screen: brand hero on the left, the add-playlist form on the right.
-class WelcomeScreen extends StatelessWidget {
+class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
 
   @override
+  State<WelcomeScreen> createState() => _WelcomeScreenState();
+}
+
+class _WelcomeScreenState extends State<WelcomeScreen> {
+  final _form = GlobalKey<AddPlaylistFormState>();
+
+  @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width > 900;
+    final size = MediaQuery.sizeOf(context);
+    final wide = size.width > 900;
+    final short = size.height < 720;
     final hero = Padding(
-      padding: const EdgeInsets.all(32),
+      padding: EdgeInsets.all(short ? 20 : 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: wide ? CrossAxisAlignment.start : CrossAxisAlignment.center,
         children: [
-          const AppLogo(size: 64),
-          const SizedBox(height: 24),
+          AppLogo(size: short ? 44 : 64),
+          SizedBox(height: short ? 12 : 24),
           Text(
             'Live TV, movies and series\nfrom your IPTV provider.',
             textAlign: wide ? TextAlign.start : TextAlign.center,
@@ -32,8 +45,25 @@ class WelcomeScreen extends StatelessWidget {
             'Works with M3U playlists, Xtream Codes and Stalker portals.',
             style: TextStyle(color: Brand.textSecondary),
           ),
-          const SizedBox(height: 28),
+          SizedBox(height: short ? 14 : 28),
           const ImadLabsMark(size: 26, prefix: 'by '),
+          // TV and desktop: the QR code is on screen straight away.
+          if (wide) ...[
+            SizedBox(height: short ? 16 : 32),
+            Container(
+              padding: EdgeInsets.all(short ? 14 : 20),
+              decoration: BoxDecoration(
+                color: Brand.surfaceCard.withValues(alpha: 0.7),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Brand.border),
+              ),
+              child: PairCard(
+                qrSize: short ? 150 : null,
+                onReceived: (d) => _form.currentState?.applyDraft(d),
+                onImported: (t) => _form.currentState?.importTransfer(t),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -50,40 +80,74 @@ class WelcomeScreen extends StatelessWidget {
           child: wide
               ? Row(
                   children: [
-                    Expanded(child: Center(child: hero)),
-                    const Expanded(child: Center(child: AddPlaylistForm())),
+                    Expanded(child: Center(child: SingleChildScrollView(child: hero))),
+                    Expanded(child: Center(child: SingleChildScrollView(child: AddPlaylistForm(key: _form, showPairButton: false)))),
                   ],
                 )
-              : SingleChildScrollView(child: Column(children: [hero, const AddPlaylistForm()])),
+              : SingleChildScrollView(child: Column(children: [hero, AddPlaylistForm(key: _form)])),
         ),
       ),
     );
   }
 }
 
-class AddPlaylistScreen extends StatelessWidget {
+class AddPlaylistScreen extends StatefulWidget {
   const AddPlaylistScreen({super.key, this.existing});
 
   final PlaylistProfile? existing;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(existing == null ? 'Add playlist' : 'Edit playlist')),
-    body: Center(child: AddPlaylistForm(existing: existing, popOnDone: true)),
-  );
+  State<AddPlaylistScreen> createState() => _AddPlaylistScreenState();
+}
+
+class _AddPlaylistScreenState extends State<AddPlaylistScreen> {
+  final _form = GlobalKey<AddPlaylistFormState>();
+
+  @override
+  Widget build(BuildContext context) {
+    // TV / desktop: the QR code sits next to the form, so a phone or another TV can send
+    // the playlist without anyone pressing a button first.
+    final wide = MediaQuery.sizeOf(context).width > 900 && widget.existing == null;
+    final form = AddPlaylistForm(key: _form, existing: widget.existing, popOnDone: true, showPairButton: !wide);
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.existing == null ? 'Add playlist' : 'Edit playlist')),
+      body: wide
+          ? Row(
+              children: [
+                Expanded(
+                  child: Center(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: PairCard(
+                        qrSize: MediaQuery.sizeOf(context).height < 720 ? 170 : null,
+                        onReceived: (d) => _form.currentState?.applyDraft(d),
+                        onImported: (t) => _form.currentState?.importTransfer(t),
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(child: Center(child: SingleChildScrollView(child: form))),
+              ],
+            )
+          : Center(child: SingleChildScrollView(child: form)),
+    );
+  }
 }
 
 class AddPlaylistForm extends StatefulWidget {
-  const AddPlaylistForm({super.key, this.existing, this.popOnDone = false});
+  const AddPlaylistForm({super.key, this.existing, this.popOnDone = false, this.showPairButton = true});
 
   final PlaylistProfile? existing;
   final bool popOnDone;
 
+  /// False when a QR code is already on screen next to the form.
+  final bool showPairButton;
+
   @override
-  State<AddPlaylistForm> createState() => _AddPlaylistFormState();
+  State<AddPlaylistForm> createState() => AddPlaylistFormState();
 }
 
-class _AddPlaylistFormState extends State<AddPlaylistForm> {
+class AddPlaylistFormState extends State<AddPlaylistForm> {
   late SourceKind _kind = widget.existing?.kind ?? SourceKind.xtream;
   late final _name = TextEditingController(text: widget.existing?.name ?? '');
   late final _url = TextEditingController(text: widget.existing?.url ?? '');
@@ -130,6 +194,79 @@ class _AddPlaylistFormState extends State<AddPlaylistForm> {
     super.dispose();
   }
 
+  /// Fills the form from a link or the phone and connects right away when it's complete.
+  void applyDraft(PlaylistDraft d, {bool connect = true}) {
+    if (_busy) return;
+    setState(() {
+      if (widget.existing == null) _kind = d.kind;
+      _url.text = d.url;
+      if (d.name.isNotEmpty) _name.text = d.name;
+      if (d.username.isNotEmpty || d.kind == SourceKind.xtream) _user.text = d.username;
+      if (d.password.isNotEmpty || d.kind == SourceKind.xtream) _pass.text = d.password;
+      if (d.mac.isNotEmpty) _mac.text = d.mac;
+      if (d.epgUrl.isNotEmpty) _epg.text = d.epgUrl;
+      if (d.userAgent.isNotEmpty) _ua.text = d.userAgent;
+      if (d.hasIdentity) {
+        _serial.text = d.serial;
+        _deviceId.text = d.deviceId;
+        _deviceId2.text = d.deviceId2;
+        _signature.text = d.signature;
+        _stbModel.text = d.stbModel;
+        _deviceIds = true;
+      }
+      if (d.epgUrl.isNotEmpty || d.userAgent.isNotEmpty) _advanced = true;
+      _error = d.missing;
+    });
+    if (connect && d.missing == null) _submit();
+  }
+
+  Future<void> _pasteLink() async {
+    final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text ?? '';
+    final d = PlaylistDraft.parse(text);
+    if (!mounted) return;
+    if (d == null) {
+      setState(() => _error = text.trim().isEmpty ? 'The clipboard is empty. Copy your playlist link first.' : 'The clipboard doesn\'t contain a playlist link.');
+      return;
+    }
+    applyDraft(d);
+  }
+
+  Future<void> _usePhone() async {
+    final r = await showPairDialog(context);
+    if (!mounted) return;
+    if (r is PlaylistDraft) applyDraft(r);
+    if (r is PlaylistTransfer) importTransfer(r);
+  }
+
+  /// Playlists copied from another device: connect to the one it was using and keep the rest.
+  Future<void> importTransfer(PlaylistTransfer t) async {
+    if (_busy) return;
+    final store = context.read<LibraryStore>();
+    final session = context.read<Session>();
+    final existing = {for (final p in store.profiles) p.id};
+    final fresh = t.profiles.where((p) => !existing.contains(p.id)).toList();
+    final all = fresh.isEmpty ? t.profiles : fresh;
+    final first = all.firstWhere((p) => p.id == t.activeId, orElse: () => all.first);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final ok = await session.connect(first);
+    if (!mounted) return;
+    if (!ok) {
+      setState(() {
+        _busy = false;
+        _error = 'Got ${t.profiles.length} playlist(s) from ${t.from}, but connecting failed: ${session.error}';
+      });
+      return;
+    }
+    for (final p in all) {
+      await store.upsertProfile(p);
+    }
+    await store.setActiveProfile(first.id);
+    if (widget.popOnDone && mounted) Navigator.of(context).pop();
+  }
+
   String? _validate() {
     if (_url.text.trim().isEmpty) {
       return switch (_kind) {
@@ -153,6 +290,18 @@ class _AddPlaylistFormState extends State<AddPlaylistForm> {
   }
 
   Future<void> _submit() async {
+    // A full get.php / player_api.php link pasted into the URL box: take the login from it.
+    final parsed = PlaylistDraft.parse(_url.text);
+    if (parsed != null &&
+        parsed.kind == SourceKind.xtream &&
+        _kind != SourceKind.stalker &&
+        widget.existing?.kind != SourceKind.m3u &&
+        (_kind == SourceKind.xtream || _url.text.contains('get.php') || _url.text.contains('player_api.php'))) {
+      _kind = SourceKind.xtream;
+      _url.text = parsed.url;
+      _user.text = parsed.username;
+      _pass.text = parsed.password;
+    }
     final problem = _validate();
     if (problem != null) {
       setState(() => _error = problem);
@@ -206,7 +355,8 @@ class _AddPlaylistFormState extends State<AddPlaylistForm> {
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
-      child: TextField(
+      child: TvTextKeys(
+        child: TextField(
         controller: c,
         obscureText: obscure,
         keyboardType: type,
@@ -215,6 +365,7 @@ class _AddPlaylistFormState extends State<AddPlaylistForm> {
         enableSuggestions: false,
         textInputAction: TextInputAction.next,
         decoration: InputDecoration(labelText: label, hintText: hint, suffixIcon: suffix),
+        ),
       ),
     );
   }
@@ -236,6 +387,31 @@ class _AddPlaylistFormState extends State<AddPlaylistForm> {
                   widget.existing == null ? 'Add your playlist' : 'Edit playlist',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
+                if (widget.existing == null) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (widget.showPairButton)
+                        OutlinedButton.icon(
+                          onPressed: _busy ? null : _usePhone,
+                          icon: const Icon(Icons.qr_code_2_rounded),
+                          label: const Text('Use your phone'),
+                        ),
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _pasteLink,
+                        icon: const Icon(Icons.content_paste_rounded),
+                        label: const Text('Paste link'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Or fill it in yourself:',
+                    style: TextStyle(color: Brand.textMuted, fontSize: 13),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 Row(
                   children: [

@@ -4,6 +4,7 @@ import 'package:iptv/core/models.dart';
 import 'package:iptv/core/sources/m3u_source.dart';
 import 'package:iptv/data/library_store.dart';
 import 'package:iptv/main.dart';
+import 'package:iptv/ui/widgets/pair_card.dart';
 import 'package:iptv/state/session.dart';
 import 'package:iptv/ui/screens/home_shell.dart';
 import 'package:iptv/ui/theme.dart';
@@ -28,12 +29,13 @@ Widget _app(LibraryStore store, Session session, Widget home) => MultiProvider(
 );
 
 void main() {
+  PairCard.debugFakeUrl = 'http://192.168.1.20:8765/?k=demo2026';
   testWidgets('first run shows the add-playlist form', (tester) async {
     tester.view.physicalSize = const Size(1920, 1080);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final store = LibraryStore.memory();
-    await tester.pumpWidget(IptvApp(store: store));
+    await tester.pumpWidget(IptvApp(store: store, checkUpdates: false));
     await tester.pump();
     expect(find.text('Add your playlist'), findsOneWidget);
     expect(find.text('Connect'), findsOneWidget);

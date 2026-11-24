@@ -10,6 +10,7 @@ import 'ui/platform.dart';
 import 'ui/screens/home_shell.dart';
 import 'ui/screens/welcome_screen.dart';
 import 'ui/theme.dart';
+import 'ui/widgets/update_dialog.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +22,12 @@ Future<void> main() async {
 }
 
 class IptvApp extends StatelessWidget {
-  const IptvApp({super.key, required this.store, this.cache});
+  IptvApp({super.key, required this.store, this.cache, this.checkUpdates = true});
+
+  final _navigatorKey = GlobalKey<NavigatorState>();
+
+  /// Off in tests and screenshots.
+  final bool checkUpdates;
 
   final LibraryStore store;
   final DiskCache? cache;
@@ -46,6 +52,9 @@ class IptvApp extends StatelessWidget {
           const SingleActivator(LogicalKeyboardKey.enter): const ActivateIntent(),
           const SingleActivator(LogicalKeyboardKey.numpadEnter): const ActivateIntent(),
         },
+        navigatorKey: _navigatorKey,
+        builder: (context, child) =>
+            checkUpdates ? UpdateWatcher(navigatorKey: _navigatorKey, child: child!) : child!,
         home: const RootGate(),
       ),
     );

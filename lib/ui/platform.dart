@@ -65,6 +65,22 @@ abstract final class AppPlatform {
   }
 
   /// Opens the system installer for a downloaded APK.
+  /// A friendly name for this device, shown when sending playlists between devices.
+  static Future<String> deviceName() async {
+    if (isAndroid) {
+      try {
+        final n = await _channel.invokeMethod<String>('deviceName');
+        if (n != null && n.trim().isNotEmpty) return n.trim();
+      } catch (_) {}
+      return isTv ? 'Android TV' : 'Android phone';
+    }
+    try {
+      final h = Platform.localHostname;
+      if (h.isNotEmpty && h != 'localhost') return h;
+    } catch (_) {}
+    return Platform.isWindows ? 'Windows PC' : 'Computer';
+  }
+
   static Future<bool> installApk(String path) async {
     try {
       return await _channel.invokeMethod<bool>('installApk', {'path': path}) ?? false;
